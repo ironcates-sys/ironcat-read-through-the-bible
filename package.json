@@ -1,0 +1,15 @@
+{
+  "name": "ironcat-read-through-the-bible",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Private family Bible audio read-through PWA (Netlify). Streams from Bible Brain; never stores audio.",
+  "license": "UNLICENSED",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "plan": "node scripts/csv-to-plan.js",
+    "dev": "node scripts/dev-server.js",
+    "test": "node --test tests/",
+    "announce": "python3 scripts/generate-announcements.py",
+    "icons": "python3 scripts/make-icons.py"
+  }
+}

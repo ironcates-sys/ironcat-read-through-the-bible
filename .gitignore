@@ -1,0 +1,15 @@
+# secrets / local config
+.env
+.env.*
+!.env.example
+
+# dependencies / tooling
+node_modules/
+.netlify/
+.tts-venv/
+*.onnx
+*.onnx.json
+
+# misc
+.DS_Store
+*.log
