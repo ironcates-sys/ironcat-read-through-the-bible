@@ -12,8 +12,8 @@ A **private** audio Bible read-through PWA for Steve and his wife. It plays the 
 
 | Piece | Notes |
 |---|---|
-| Plan | `data/prophets-daily-reading-plan.csv` → `public/data/plan.json` (`npm run plan`, also runs on Netlify build). Translation-independent: `{book, bookId, chapter}` items, six per day, 66 days. |
-| Queue | Plays the six chapters in plan order and auto-advances. After chapter 6 the day is marked done and the next unread day is loaded. After day 66 a new cycle begins. |
+| Plan | The bundled default is `data/prophets-daily-reading-plan.csv` → `public/data/plan.json` (`npm run plan`, also runs on Netlify build). Translation-independent: `{book, bookId, chapter}` items, six per day, 66 days. You can replace it in the app with your own CSV (see *Custom plans*). |
+| Queue | Plays the day's chapters (six in the default plan) in plan order and auto-advances. After the day's last chapter the day is marked done and the next unread day is loaded. After the last day a new cycle begins (cycle length = number of days in the plan). |
 | Progress | `localStorage` only (day, chapter position, seconds into chapter, cycle, done days per cycle, saved verses). Nothing is stored server-side. Progress lives in the browser/PWA on each device separately. |
 | Streak | Gentle: "N of 66 days read this cycle", "x of the last 7 days". A missed day just pauses: nothing resets and there is no scolding. "Skip to today" jumps to the calendar day; "Jump to a day" picks any day. |
 | Audio | **One** reused `<audio>` element. Each chapter's signed URL is requested from `/api/chapter` right before play; the next chapter's URL is requested ~25 s before the current one ends. |
@@ -30,6 +30,32 @@ A **private** audio Bible read-through PWA for Steve and his wife. It plays the 
 
 All responses carry `Cache-Control: no-store`. The key is used only inside the functions and is scrubbed from any error text.
 Without `BIBLE_BRAIN_KEY` the functions return clearly labelled **MOCK** data (a generated test tone, `mock: true`, and a banner in the UI).
+
+## Custom plans (Upload plan CSV)
+Settings (gear icon) → **Reading plan** has three buttons: *Upload plan CSV*, *Download current plan as CSV* (a ready-made template: edit it and upload it back), and *Reset to default plan*.
+
+**CSV format**
+```csv
+Day,Morning,Evening
+1,Isaiah 1,Psalm 1
+2,"Jeremiah 1-2",Psalm 2
+3,Obadiah,"John 3; John 4"
+```
+- A header row with a column named `Day`, plus **any number** of other columns (their names don't matter). Days must be numbered 1, 2, 3 ... with no gaps or repeats (rows may be in any order). `Day 3` is accepted as well as `3`.
+- Each cell may be empty or hold one or more references: `Isaiah 1` (book + chapter), `Jeremiah 1-2` (chapter range; en dash is fine), or several separated by `;` or `+`. Whole chapters only; verses (`John 3:16`) are rejected.
+- Single-chapter books (Obadiah, Philemon, 2 John, 3 John, Jude) may be written as just the name.
+- Book names are matched forgivingly (`Psalm`/`Psalms`, `1 John`/`I John`, `Song of Songs`, common abbreviations like `Gen`, `Matt`, `Rev`). Chapters are checked against real chapter counts (e.g. Isaiah has 66). Each day may have up to 30 chapters, and a plan up to 1000 days.
+- Chapters play in order: columns left to right, and within a cell left to right. The existing prophets CSV (`Day,Isaiah,Jeremiah_Lamentations,...`) is just this format.
+- Comma- or tab-separated, UTF-8 (Excel, Numbers and Google Sheets "Save as CSV" all work).
+
+**What happens on upload**
+1. The file is parsed and validated in the browser. Problems are listed with row/column (e.g. `Row 2 (Day 1), column "Morning": unknown book "Isaih" (did you mean Isaiah?)`) and **nothing changes** until you fix the file.
+2. A preview shows day/chapter totals and sample days; you accept or cancel.
+3. You choose **Restart at Day 1** or **Keep my current day number** (clamped to the new plan length). Either way your cycle number, reading history and saved verses are kept; finished-day marks for the current cycle are cleared on restart, and on keep only marks beyond the new length are dropped.
+4. The plan is saved in this device's `localStorage` (key `ironcat.plan.v1`). **It is never sent to any server** and never put in the service-worker cache. It is re-validated each launch; if the stored copy is damaged it is discarded and the default plan returns. Each device keeps its own plan, so upload the same file on both phones.
+5. *Reset to default plan* removes the custom plan and returns to the bundled one (same Restart/Keep choice).
+
+Announcement clips exist only for the prophets chapters. Other chapters simply play without an announcement (regenerate with `scripts/generate-announcements.py`, which reads `public/data/plan.json`, if you want more).
 
 ## Setup
 
@@ -82,6 +108,7 @@ Install to Home Screen first (Safari → Share → Add to Home Screen), then ope
 - [ ] **Airplane mode:** with the app open and paused, airplane mode on → app shell still opens, tapping Play shows a friendly offline message (no crash). Turn airplane mode off → Play works again. Also mid-chapter: toggling airplane mode should stall playback, not corrupt progress.
 - [ ] Close and reopen the app: day, chapter, and (roughly) the second are restored.
 - [ ] Mark day read / not read, Jump to a day, Skip to today after a couple of days away.
+- [ ] Custom plan: download the template from Settings, edit it, upload it, check the preview, accept; then Reset to default plan.
 - [ ] Save this verse → appears under ★ Saved (reference only, no text).
 - [ ] Switch translation mid-chapter: current chapter keeps playing; the next chapter uses the new one.
 - [ ] After a long pause (> 1 day) signed URLs expire, but the app resolves a fresh URL on resume/next play.
@@ -106,9 +133,9 @@ Install to Home Screen first (Safari → Share → Add to Home Screen), then ope
 ```
 netlify.toml
 netlify/functions/   auth.js translations.js chapter.js timestamps.js lib/{common,mock}.js
-public/              index.html sw.js manifest.webmanifest robots.txt css/ js/{app,queue,version}.js
+public/              index.html sw.js manifest.webmanifest robots.txt css/ js/{app,queue,plan,version}.js
                      data/plan.json announce/*.mp3 icons/ mock/tone.mp3
 data/                prophets-daily-reading-plan.csv
-scripts/             csv-to-plan.js dev-server.js make-icons.py generate-announcements.py e2e-smoke.js
-tests/               queue.test.js functions.test.js
+scripts/             csv-to-plan.js dev-server.js make-icons.py generate-announcements.py e2e-smoke.js e2e-plan.js
+tests/               queue.test.js plan.test.js functions.test.js
 ```
