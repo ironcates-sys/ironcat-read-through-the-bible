@@ -53,7 +53,7 @@
     if (!Array.isArray(out.saved)) out.saved = [];
     out.cycle = Math.max(1, out.cycle | 0);
     out.day = Math.min(len, Math.max(1, out.day | 0));
-    out.pos = Math.min(ITEMS_PER_DAY - 1, Math.max(0, out.pos | 0));
+    out.pos = Math.min(99, Math.max(0, out.pos | 0));  // app clamps to the day's real chapter count
     out.t = Math.max(0, Number(out.t) || 0);
     return out;
   }
@@ -118,8 +118,10 @@
   }
 
   // A chapter finished: go to the next chapter, or finish the day after the sixth.
-  function chapterFinished(state, today, len) {
-    if (state.pos + 1 >= ITEMS_PER_DAY) {
+  // `count` = number of chapters in the current day (plans can have any number per day).
+  function chapterFinished(state, today, len, count) {
+    count = count || ITEMS_PER_DAY;
+    if (state.pos + 1 >= count) {
       var r = finishDay(state, today, len);
       r.dayFinished = true;
       return r;
@@ -131,9 +133,9 @@
     return { state: s, dayFinished: false, cycleCompleted: false, finishedDay: null };
   }
 
-  function setPosition(state, pos) {
+  function setPosition(state, pos, count) {
     var s = clone(state);
-    s.pos = Math.min(ITEMS_PER_DAY - 1, Math.max(0, pos));
+    s.pos = Math.min((count || ITEMS_PER_DAY) - 1, Math.max(0, pos));
     s.t = 0;
     return s;
   }
@@ -163,6 +165,21 @@
     s.cycle += 1;
     s.day = 1; s.pos = 0; s.t = 0;
     s.anchorDate = today; s.anchorDay = 1;
+    return s;
+  }
+
+  // The reading plan was replaced. mode: 'restart' (Day 1, finished-day marks for this cycle cleared)
+  // or 'keep' (same day number, clamped to the new length; marks beyond the new length dropped).
+  // The cycle number and reading history (readDates, saved verses) are kept either way.
+  function applyPlanChange(state, newLen, mode, today) {
+    var s = clone(state), k = String(s.cycle);
+    if (mode === 'restart') { s.done[k] = []; s.day = 1; }
+    else {
+      s.done[k] = (s.done[k] || []).filter(function (d) { return d <= newLen; });
+      s.day = Math.min(newLen, Math.max(1, s.day));
+    }
+    s.pos = 0; s.t = 0;
+    s.anchorDate = today; s.anchorDay = s.day;
     return s;
   }
 
@@ -209,7 +226,7 @@
     defaultState: defaultState, normalize: normalize, doneList: doneList, isDone: isDone,
     calendarDay: calendarDay, nextUndoneDay: nextUndoneDay,
     markDone: markDone, unmarkDone: unmarkDone, finishDay: finishDay, chapterFinished: chapterFinished,
-    setPosition: setPosition, jumpToDay: jumpToDay, skipToToday: skipToToday, startNewCycle: startNewCycle,
+    setPosition: setPosition, applyPlanChange: applyPlanChange, jumpToDay: jumpToDay, skipToToday: skipToToday, startNewCycle: startNewCycle,
     behindBy: behindBy, streakInfo: streakInfo, saveVerse: saveVerse,
   };
 });
