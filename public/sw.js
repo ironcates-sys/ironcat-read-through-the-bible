@@ -5,7 +5,7 @@ importScripts('/js/version.js');
 
 var CACHE = 'ironcat-shell-' + APP_VERSION;
 var SHELL = [
-  '/', '/index.html', '/css/style.css', '/js/version.js', '/js/queue.js', '/js/app.js',
+  '/', '/index.html', '/css/style.css', '/js/version.js', '/js/queue.js', '/js/plan.js', '/js/app.js',
   '/manifest.webmanifest', '/data/plan.json',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-512.png', '/icons/apple-touch-icon.png',
 ];

@@ -111,3 +111,14 @@ dialog .btn { margin: 4px 4px 4px 0; }
   font-size: 15px; max-width: 90%; text-align: center;
 }
 @media (prefers-reduced-motion: no-preference) { .play { transition: transform .1s; } }
+
+h4 { margin: 4px 0; font-weight: normal; font-size: 17px; color: var(--gold); letter-spacing: .04em; }
+.row.left { justify-content: flex-start; }
+.errs { padding-left: 18px; margin: 8px 0 16px; font-family: var(--sans); font-size: 14px; max-height: 40vh; overflow: auto; color: var(--ink); }
+.errs li { margin: 4px 0; }
+.prev { list-style: none; padding: 0; margin: 8px 0 14px; font-size: 16px; max-height: 32vh; overflow: auto; }
+.prev li { padding: 4px 0; border-top: 1px solid var(--line); }
+.prev li:first-child { border-top: 0; }
+.choice { border: 1px solid var(--line); border-radius: 12px; margin: 10px 0 14px; padding: 6px 12px; }
+.choice legend { padding: 0 6px; }
+.eyebrow + .small { margin: 0; }

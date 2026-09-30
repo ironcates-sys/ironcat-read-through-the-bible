@@ -10,10 +10,13 @@
   var LS_TOKEN = 'ironcat.token.v1';
   var LS_STATE = 'ironcat.state.v1';
   var LS_SETTINGS = 'ironcat.settings.v1';
+  var LS_PLAN = 'ironcat.plan.v1';       // uploaded custom plan (stays on this device; never sent anywhere)
   var PREFETCH_SECONDS = 25;   // resolve the next chapter's URL this long before the current one ends
   var PREFETCH_MAX_AGE = 10 * 60 * 1000;
 
   var plan = null;
+  var defaultPlan = null;
+  var usingCustom = false;
   var len = 66;
   var state = null;
   var settings = { translation: '', announce: true, pause: 0, speed: 1 };
@@ -60,7 +63,8 @@
   }
   function label(it) { return it.book + ' ' + it.chapter; }
   function todayItems() { return plan.days[state.day - 1].items; }
-  function currentItem() { return todayItems()[state.pos]; }
+  function currentItem() { return todayItems()[Math.min(state.pos, todayItems().length - 1)]; }
+  function dayCount() { return todayItems().length; }
   function isSingle(it) { return plan.books[it.book].chapters === 1; }
 
   // ---------- API (token on every call; nothing is cached) ----------
@@ -109,6 +113,7 @@
     var done = Q.isDone(state, state.day);
     $('cycle-line').textContent = 'Cycle ' + state.cycle + ' \u00b7 Day ' + state.day + ' of ' + len;
     $('day-title').textContent = "Today\u2019s reading";
+    $('plan-name').textContent = usingCustom ? 'Custom plan' : '';
     var note = $('complete-note');
     note.hidden = !done;
     note.textContent = done ? 'This day is marked as read.' : '';
@@ -205,7 +210,7 @@
     if (prefetchedFor === state.pos) return;
     prefetchedFor = state.pos;
     var nextPos = state.pos + 1;
-    if (nextPos >= Q.ITEMS_PER_DAY || sleepStopAfterChapter || sleepMode === 'chapter') return;
+    if (nextPos >= dayCount() || sleepStopAfterChapter || sleepMode === 'chapter') return;
     var it = todayItems()[nextPos];
     var tr = sessionTranslation;
     var p = fetchChapter(it, tr);
@@ -228,7 +233,7 @@
   }
 
   function startAt(pos) {
-    state = Q.setPosition(state, pos); saveState();
+    state = Q.setPosition(state, pos, dayCount()); saveState();
     startItem(0);
   }
 
@@ -294,7 +299,7 @@
   }
 
   function onChapterEnded() {
-    var r = Q.chapterFinished(state, today(), len);
+    var r = Q.chapterFinished(state, today(), len, dayCount());
     state = r.state; saveState();
     var stopHere = sleepStopAfterChapter || sleepMode === 'chapter';
     if (stopHere) { clearSleep(); phase = 'idle'; toast('Sleep well. Your place is saved.', 5000); render(); return; }
@@ -388,15 +393,15 @@
     if (phase === 'chapter') audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 15);
   }
   function nextChapter() {
-    if (state.pos >= Q.ITEMS_PER_DAY - 1) { toast('This is the last chapter of today\u2019s reading.'); return; }
+    if (state.pos >= dayCount() - 1) { toast('This is the last chapter of today\u2019s reading.'); return; }
     var was = phase !== 'idle' && !audio.paused;
-    state = Q.setPosition(state, state.pos + 1); saveState();
+    state = Q.setPosition(state, state.pos + 1, dayCount()); saveState();
     if (was) startItem(0); else { stopPlayback(); render(); }
   }
   function prevChapter() {
     var was = phase !== 'idle' && !audio.paused;
     if (phase === 'chapter' && audio.currentTime > 5) { audio.currentTime = 0; return; }
-    if (state.pos > 0) state = Q.setPosition(state, state.pos - 1); else state = Q.setPosition(state, 0);
+    if (state.pos > 0) state = Q.setPosition(state, state.pos - 1, dayCount()); else state = Q.setPosition(state, 0, dayCount());
     saveState();
     if (was) startItem(0); else { stopPlayback(); render(); }
   }
@@ -614,6 +619,98 @@
     showGate('This device is locked.');
   });
 
+
+  // ---------- reading plan: upload / download / reset ----------
+  var pendingPlan = null;   // { plan, custom }
+  function applyPlan(p, custom) {
+    plan = p; len = p.cycleLength; usingCustom = custom;
+    $('plan-info').textContent = planSummaryText(p);
+  }
+  function planSummaryText(p) {
+    var s = Plan.summarize(p);
+    return (usingCustom ? 'Custom plan' : 'Default: ' + (p.title || 'Prophets plan')) + ' \u00b7 ' + s.days + ' days \u00b7 ' + s.chapters + ' chapters' +
+      (s.minPerDay === s.maxPerDay ? ' (' + s.minPerDay + ' a day)' : ' (' + s.minPerDay + '\u2013' + s.maxPerDay + ' a day)');
+  }
+  function download(name, text) {
+    var blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+  function showPlanPreview(res, fileName, isReset) {
+    var errBox = $('plan-errors'), body = $('plan-preview'), choice = $('plan-choice'), ok = $('btn-plan-accept');
+    errBox.innerHTML = ''; body.innerHTML = '';
+    $('plan-file').textContent = fileName || '';
+    if (!res.ok) {
+      pendingPlan = null;
+      $('plan-title').textContent = 'This plan can\u2019t be used yet';
+      var p0 = document.createElement('p'); p0.className = 'quiet small';
+      p0.textContent = res.errors.length + ' problem' + (res.errors.length === 1 ? '' : 's') + ' found. Nothing was changed. Fix the file and try again.';
+      errBox.appendChild(p0);
+      var ul = document.createElement('ul'); ul.className = 'errs';
+      res.errors.slice(0, 25).forEach(function (e) { var li = document.createElement('li'); li.textContent = e; ul.appendChild(li); });
+      if (res.errors.length > 25) { var more = document.createElement('li'); more.textContent = '\u2026and ' + (res.errors.length - 25) + ' more.'; ul.appendChild(more); }
+      errBox.appendChild(ul);
+      choice.hidden = true; ok.hidden = true;
+    } else {
+      pendingPlan = { plan: res.plan, custom: !isReset };
+      $('plan-title').textContent = isReset ? 'Go back to the default plan?' : 'Preview: does this look right?';
+      var s = Plan.summarize(res.plan);
+      var sum = document.createElement('p');
+      sum.textContent = s.days + ' days, ' + s.chapters + ' chapters, ' + s.books.length + ' book' + (s.books.length === 1 ? '' : 's') +
+        (s.minPerDay === s.maxPerDay ? ', ' + s.minPerDay + ' chapters a day.' : ', ' + s.minPerDay + '\u2013' + s.maxPerDay + ' chapters a day.');
+      body.appendChild(sum);
+      var tbl = document.createElement('ol'); tbl.className = 'prev';
+      var show = res.plan.days.length <= 6 ? res.plan.days : res.plan.days.slice(0, 3).concat([null], res.plan.days.slice(-2));
+      show.forEach(function (d) {
+        var li = document.createElement('li');
+        if (!d) { li.textContent = '\u2026'; li.className = 'quiet'; }
+        else { li.innerHTML = '<b></b> <span></span>'; li.firstChild.textContent = 'Day ' + d.day; li.lastChild.textContent = Plan.label(d.items); }
+        tbl.appendChild(li);
+      });
+      body.appendChild(tbl);
+      $('plan-choice-text').textContent = 'You are on Day ' + state.day + ' of ' + len + ' now. The new plan has ' + res.plan.cycleLength + ' days.';
+      $('plan-keep-label').textContent = 'Keep my current day number (Day ' + Math.min(res.plan.cycleLength, state.day) + ')';
+      document.querySelector('input[name="plan-mode"][value="restart"]').checked = true;
+      choice.hidden = false; ok.hidden = false;
+    }
+    $('dlg-plan').showModal();
+  }
+  $('btn-plan-upload').addEventListener('click', function () { $('plan-input').value = ''; $('plan-input').click(); });
+  $('plan-input').addEventListener('change', function () {
+    var f = this.files && this.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function () { $('dlg-settings').close(); showPlanPreview(Plan.parsePlan(String(reader.result), { title: 'Custom plan' }), f.name, false); };
+    reader.onerror = function () { toast('Could not read that file.'); };
+    if (f.size > Plan.LIMITS.maxBytes) { $('dlg-settings').close(); showPlanPreview({ ok: false, errors: ['The file is too large.'] }, f.name, false); return; }
+    reader.readAsText(f);
+  });
+  $('btn-plan-download').addEventListener('click', function () {
+    download(usingCustom ? 'my-reading-plan.csv' : 'reading-plan-template.csv', Plan.planToCsv(plan));
+  });
+  $('btn-plan-reset').addEventListener('click', function () {
+    if (!usingCustom) { toast('You are already using the default plan.'); return; }
+    $('dlg-settings').close();
+    showPlanPreview({ ok: true, errors: [], plan: defaultPlan }, 'Bundled default plan', true);
+  });
+  $('btn-plan-accept').addEventListener('click', function () {
+    if (!pendingPlan) return;
+    var mode = document.querySelector('input[name="plan-mode"]:checked').value;
+    stopPlayback();
+    applyPlan(pendingPlan.plan, pendingPlan.custom);
+    if (pendingPlan.custom) store(LS_PLAN, pendingPlan.plan); else { try { localStorage.removeItem(LS_PLAN); } catch (e) { /* ignore */ } }
+    state = Q.applyPlanChange(state, len, mode, today());
+    saveState();
+    pendingPlan = null;
+    $('dlg-plan').close();
+    $('banner-msg').hidden = true;
+    render();
+    toast(usingCustom ? 'Your plan is saved on this device.' : 'Back to the default plan.');
+  });
+  $('btn-plan-cancel').addEventListener('click', function () { pendingPlan = null; $('dlg-plan').close(); });
+
   // ---------- service worker + updates ----------
   function setupServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
@@ -658,8 +755,12 @@
     if (saved) settings = Object.assign(settings, saved);
     if (!(settings.speed >= 0.75 && settings.speed <= 1.5)) settings.speed = 1;
     fetch('/data/plan.json').then(function (r) { return r.json(); }).then(function (p) {
-      plan = p; len = p.cycleLength;
+      defaultPlan = p;
+      var stored = load(LS_PLAN), custom = stored ? Plan.fromStored(stored) : null;
+      if (stored && !custom) { try { localStorage.removeItem(LS_PLAN); } catch (e) { /* ignore */ } }
+      applyPlan(custom || p, !!custom);
       state = Q.normalize(load(LS_STATE), today(), len);
+      state.pos = Math.min(state.pos, dayCount() - 1);
       saveState();
       if (getToken()) launch(); else showGate('');
     }).catch(function () {

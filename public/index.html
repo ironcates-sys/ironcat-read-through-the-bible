@@ -49,6 +49,7 @@
 
     <section class="day-card" aria-labelledby="day-title">
       <p class="eyebrow" id="cycle-line"></p>
+      <p class="quiet small" id="plan-name"></p>
       <h2 id="day-title"></h2>
       <p id="complete-note" class="note" hidden></p>
       <ol id="chapter-list" class="chapters"></ol>
@@ -140,10 +141,36 @@
         <select id="set-pause"><option value="0">None</option><option value="3">3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select>
       </label>
       <hr>
+      <h4>Reading plan</h4>
+      <p id="plan-info" class="quiet small"></p>
+      <div class="row left">
+        <button type="button" id="btn-plan-upload" class="btn">Upload plan CSV</button>
+        <button type="button" id="btn-plan-download" class="btn">Download current plan as CSV</button>
+        <button type="button" id="btn-plan-reset" class="btn">Reset to default plan</button>
+      </div>
+      <p class="quiet small">Your plan is saved only on this device. Nothing is uploaded anywhere.</p>
+      <input type="file" id="plan-input" accept=".csv,text/csv,text/plain,.txt" hidden>
+      <hr>
       <button type="button" id="btn-newcycle" class="btn">Start a new cycle from Day 1</button>
       <button type="button" id="btn-signout" class="btn">Lock this device</button>
       <p class="quiet small">Version <span id="app-version"></span></p>
       <button class="btn primary">Done</button>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-plan">
+    <form method="dialog" onsubmit="return false">
+      <h3 id="plan-title">Preview</h3>
+      <p class="quiet small" id="plan-file"></p>
+      <div id="plan-errors"></div>
+      <div id="plan-preview"></div>
+      <fieldset id="plan-choice" class="choice" hidden>
+        <legend class="small quiet" id="plan-choice-text"></legend>
+        <label class="check"><input type="radio" name="plan-mode" value="restart" checked> Restart at Day 1</label>
+        <label class="check"><input type="radio" name="plan-mode" value="keep"> <span id="plan-keep-label">Keep my current day number</span></label>
+      </fieldset>
+      <button type="button" id="btn-plan-accept" class="btn primary">Use this plan</button>
+      <button type="button" id="btn-plan-cancel" class="btn">Cancel</button>
     </form>
   </dialog>
 
@@ -161,6 +188,7 @@
 
   <script src="/js/version.js"></script>
   <script src="/js/queue.js"></script>
+  <script src="/js/plan.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>
