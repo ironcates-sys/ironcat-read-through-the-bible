@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Read Through the Bible</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
+  <meta name="googlebot" content="noindex, nofollow">
+  <meta name="description" content="Private family audio reading.">
+  <meta name="theme-color" content="#1f2a3a">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Read Through">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <!-- Passcode gate -->
+  <main id="gate" class="gate" hidden>
+    <form id="gate-form" class="gate-card" autocomplete="off">
+      <h1>Read Through the Bible</h1>
+      <p class="quiet">A private place for our family to listen.</p>
+      <label for="passcode" class="sr">Passcode</label>
+      <input id="passcode" type="password" inputmode="text" autocomplete="current-password" placeholder="Passcode" required>
+      <button type="submit" class="btn primary">Enter</button>
+      <p id="gate-msg" class="msg" role="status"></p>
+    </form>
+  </main>
+
+  <!-- App -->
+  <div id="app" class="app" hidden>
+    <header class="top">
+      <div class="brand">Read Through the Bible</div>
+      <div class="top-actions">
+        <button id="btn-saved" class="icon-btn" aria-label="Saved verses" title="Saved verses">&#9733;</button>
+        <button id="btn-settings" class="icon-btn" aria-label="Settings" title="Settings">&#9881;</button>
+      </div>
+    </header>
+
+    <div id="banner-mock" class="banner warn" hidden></div>
+    <div id="banner-update" class="banner" hidden>
+      A new version is ready.
+      <button id="btn-update" class="link">Refresh when convenient</button>
+    </div>
+    <div id="banner-msg" class="banner" hidden></div>
+
+    <section class="day-card" aria-labelledby="day-title">
+      <p class="eyebrow" id="cycle-line"></p>
+      <h2 id="day-title"></h2>
+      <p id="complete-note" class="note" hidden></p>
+      <ol id="chapter-list" class="chapters"></ol>
+      <p id="catchup" class="catchup" hidden>
+        <span id="catchup-text"></span>
+        <button id="btn-skip-today" class="link">Skip to today</button>
+      </p>
+    </section>
+
+    <section class="player" aria-label="Player">
+      <div class="now">
+        <div id="now-title" class="now-title">Ready</div>
+        <div id="now-sub" class="now-sub"></div>
+      </div>
+      <button id="btn-play" class="play" aria-label="Play">
+        <svg id="ico-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+        <svg id="ico-pause" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+      </button>
+      <div class="seek">
+        <span id="t-cur">0:00</span>
+        <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Position">
+        <span id="t-dur">0:00</span>
+      </div>
+      <div class="controls">
+        <button id="btn-prev" class="ctl" aria-label="Previous chapter">&#9198;&#xFE0E;</button>
+        <button id="btn-back" class="ctl" aria-label="Back 15 seconds">&#8634; 15</button>
+        <button id="btn-next" class="ctl" aria-label="Next chapter">&#9197;&#xFE0E;</button>
+      </div>
+      <div class="row">
+        <label>Speed
+          <select id="sel-speed">
+            <option value="0.75">0.75&times;</option><option value="0.85">0.85&times;</option>
+            <option value="1" selected>1&times;</option><option value="1.1">1.1&times;</option>
+            <option value="1.25">1.25&times;</option><option value="1.5">1.5&times;</option>
+          </select>
+        </label>
+        <label>Sleep
+          <select id="sel-sleep">
+            <option value="0">Off</option><option value="chapter">End of chapter</option>
+            <option value="15">15 min</option><option value="30">30 min</option>
+            <option value="45">45 min</option><option value="60">60 min</option>
+          </select>
+        </label>
+      </div>
+      <p id="sleep-left" class="quiet small" hidden></p>
+      <label class="wide">Translation <span class="quiet small">(a change begins with the next chapter)</span>
+        <select id="sel-translation"><option>Loading&hellip;</option></select>
+      </label>
+      <div class="row">
+        <button id="btn-verse" class="btn">Save this verse</button>
+        <button id="btn-toggle-done" class="btn"></button>
+      </div>
+      <div class="row">
+        <button id="btn-jump" class="btn">Jump to a day</button>
+      </div>
+    </section>
+
+    <section class="streak" aria-label="Progress">
+      <p id="streak-main"></p>
+      <p id="streak-sub" class="quiet small"></p>
+    </section>
+
+    <footer class="legal">
+      <p id="copyright" class="small"></p>
+      <p class="small">
+        Audio is streamed from Bible Brain (Faith Comes By Hearing) for private family use.
+        <a id="link-terms" href="https://www.faithcomesbyhearing.com/bible-brain/terms-conditions" target="_blank" rel="noopener noreferrer">Bible Brain terms</a>
+        <!-- TODO(Steve): confirm this is the DBP terms page you want to show; the old /legal/terms-of-use URL 404s. -->
+      </p>
+    </footer>
+  </div>
+
+  <!-- Sheets -->
+  <dialog id="dlg-jump">
+    <form method="dialog">
+      <h3>Jump to a day</h3>
+      <p class="quiet small">Jumping sets that day as today's reading. Days you have finished are marked.</p>
+      <div id="jump-grid" class="grid"></div>
+      <button class="btn">Close</button>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-settings">
+    <form method="dialog">
+      <h3>Settings</h3>
+      <label class="wide">Default translation <select id="set-translation"></select></label>
+      <label class="check"><input type="checkbox" id="set-announce"> Announce each chapter (&ldquo;Isaiah, chapter one&rdquo;)</label>
+      <label class="wide">Pause after each chapter
+        <select id="set-pause"><option value="0">None</option><option value="3">3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select>
+      </label>
+      <hr>
+      <button type="button" id="btn-newcycle" class="btn">Start a new cycle from Day 1</button>
+      <button type="button" id="btn-signout" class="btn">Lock this device</button>
+      <p class="quiet small">Version <span id="app-version"></span></p>
+      <button class="btn primary">Done</button>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-saved">
+    <form method="dialog">
+      <h3>Saved verses</h3>
+      <p class="quiet small">Only the reference is saved here, never the text.</p>
+      <ul id="saved-list" class="saved"></ul>
+      <button class="btn">Close</button>
+    </form>
+  </dialog>
+
+  <audio id="player" preload="auto" playsinline></audio>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="/js/version.js"></script>
+  <script src="/js/queue.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
