@@ -49,10 +49,18 @@ exports.handler = withAuth(['GET'], async () => {
       if (!totalPages || page >= totalPages) break;
     }
   }
-  const translations = [...found.values()].sort(
-    (a, b) => Number(a.partial) - Number(b.partial) || a.name.localeCompare(b.name) || Number(a.drama) - Number(b.drama)
-  );
-  return json(200, { mock: false, termsUrl: TERMS_URL, translations });
+  // Prefer Steve's default: plain (non-drama) ESV OT audio.
+  const PREFERRED = 'ENGESVO1DA';
+  const translations = [...found.values()].sort((a, b) => {
+    if (a.id === PREFERRED) return -1;
+    if (b.id === PREFERRED) return 1;
+    return (
+      Number(a.partial) - Number(b.partial) ||
+      Number(a.drama) - Number(b.drama) ||
+      a.name.localeCompare(b.name)
+    );
+  });
+  return json(200, { mock: false, termsUrl: TERMS_URL, defaultId: PREFERRED, translations });
 });
 
 exports._pickFilesets = pickFilesets; // for tests

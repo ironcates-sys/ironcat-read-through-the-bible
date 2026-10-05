@@ -31,6 +31,10 @@ A **private** audio Bible read-through PWA for Steve and his wife. It plays the 
 All responses carry `Cache-Control: no-store`. The key is used only inside the functions and is scrubbed from any error text.
 Without `BIBLE_BRAIN_KEY` the functions return clearly labelled **MOCK** data (a generated test tone, `mock: true`, and a banner in the UI).
 
+## Default translation
+
+The default audio translation is the **English Standard Version (ESV)**, plain (non-dramatized) Old Testament fileset `ENGESVO1DA`. You can change it in Settings → Default translation; the picker is built from what your Bible Brain key actually returns each launch.
+
 ## Custom plans (Upload plan CSV)
 Settings (gear icon) → **Reading plan** has three buttons: *Upload plan CSV*, *Download current plan as CSV* (a ready-made template: edit it and upload it back), and *Reset to default plan*.
 

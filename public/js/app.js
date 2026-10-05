@@ -19,7 +19,7 @@
   var usingCustom = false;
   var len = 66;
   var state = null;
-  var settings = { translation: '', announce: true, pause: 0, speed: 1 };
+  var settings = { translation: 'ENGESVO1DA', announce: true, pause: 0, speed: 1 };
   var translations = [];
   var mockMode = false;
   var sessionTranslation = '';      // what the picker shows; changes apply from the next chapter
@@ -520,7 +520,10 @@
       if (r.termsUrl) { termsUrl = r.termsUrl; $('link-terms').href = r.termsUrl; }
       if (mockMode) showMockBanner(r.notice);
       var ids = translations.map(function (t) { return t.id; });
-      sessionTranslation = ids.indexOf(settings.translation) !== -1 ? settings.translation : (ids[0] || '');
+      var preferred = settings.translation || r.defaultId || '';
+      if (ids.indexOf(preferred) === -1) preferred = ids[0] || '';
+      sessionTranslation = preferred;
+      if (!settings.translation && preferred) { settings.translation = preferred; saveSettings(); }
       fillTranslationSelects();
       if (!translations.length) toast('No audio translations were found for your key.', 6000);
     });
