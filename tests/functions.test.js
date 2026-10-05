@@ -86,8 +86,9 @@ test('live mode: only signed url/copyright/meta returned, key never echoed (stub
     if (u.includes('/bibles/filesets/')) return new Response(JSON.stringify({ data: [{ book_id: 'ISA', book_name: 'Isaiah', chapter_start: 1, path: 'https://cdn.example.org/a.mp3?Signature=abc&key=' + SECRET, duration: 400, secret_internal: 'x' }] }), { status: 200 });
     if (u.includes('/bibles?')) return new Response(JSON.stringify({ data: [{ abbr: 'ENGESV', name: 'English Standard Version', vname: 'ESV', language: 'English', filesets: { 'dbp-prod': [
       { id: 'ENGESVO2DA', set_type_code: 'audio_drama', set_size_code: 'OT' },
+      { id: 'ENGESVO1DA', type: 'audio', size: 'OT' },
       { id: 'ENGESVN2DA', set_type_code: 'audio_drama', set_size_code: 'NT' },
-      { id: 'ENGESVO1DA-opus16', set_type_code: 'audio_drama', set_size_code: 'OT' },
+      { id: 'ENGESVO1DA-opus16', type: 'audio', size: 'OT' },
       { id: 'ENGESVO2ET', set_type_code: 'text_plain', set_size_code: 'OT' }] } }], meta: { pagination: { total_pages: 1 } } }), { status: 200 });
     return new Response('{}', { status: 404 });
   };
@@ -97,7 +98,8 @@ test('live mode: only signed url/copyright/meta returned, key never echoed (stub
     const t = await fn.translations(get({}, h));
     const tb = JSON.parse(t.body);
     assert.equal(tb.mock, false);
-    assert.deepEqual(tb.translations.map((x) => x.id), ['ENGESVO2DA']);
+    assert.deepEqual(tb.translations.map((x) => x.id), ['ENGESVO1DA', 'ENGESVO2DA']);
+    assert.equal(tb.defaultId, 'ENGESVO1DA');
     const c = await fn.chapter(get({ fileset: 'ENGESVO2DA', book: 'ISA', chapter: '1', bible: 'ENGESV' }, h));
     assert.equal(c.statusCode, 200);
     const cb = JSON.parse(c.body);

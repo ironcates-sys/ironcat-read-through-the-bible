@@ -17,17 +17,21 @@ function pickFilesets(data) {
   for (const bible of data) {
     const all = Object.values(bible.filesets || {}).flat();
     for (const fs of all) {
-      if (!fs || !AUDIO_TYPES.has(fs.set_type_code)) continue;
-      if (!coversOT(fs.set_size_code)) continue;
+      if (!fs) continue;
+      // Live Bible Brain uses type/size; some docs/tests still use set_type_code/set_size_code.
+      const type = fs.set_type_code || fs.type;
+      const size = fs.set_size_code || fs.size;
+      if (!AUDIO_TYPES.has(type)) continue;
+      if (!coversOT(size)) continue;
       if (!/^[A-Z0-9]{6,16}$/.test(fs.id || '')) continue; // skips encoded variants like ...-opus16
       out.push({
         id: fs.id,
         bibleId: bible.abbr || String(fs.id).slice(0, 6),
         name: bible.vname || bible.name || fs.id,
         language: bible.language || '',
-        drama: fs.set_type_code === 'audio_drama',
-        partial: fs.set_size_code !== 'C' && fs.set_size_code !== 'OT' && fs.set_size_code !== 'NTOT',
-        size: fs.set_size_code,
+        drama: type === 'audio_drama',
+        partial: size !== 'C' && size !== 'OT' && size !== 'NTOT',
+        size,
       });
     }
   }
