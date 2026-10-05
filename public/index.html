@@ -100,10 +100,11 @@
         <select id="sel-translation"><option>Loading&hellip;</option></select>
       </label>
       <div class="row">
+        <button id="btn-follow" class="btn" aria-haspopup="dialog">Follow along</button>
         <button id="btn-verse" class="btn">Save this verse</button>
-        <button id="btn-toggle-done" class="btn"></button>
       </div>
       <div class="row">
+        <button id="btn-toggle-done" class="btn"></button>
         <button id="btn-jump" class="btn">Jump to a day</button>
       </div>
     </section>
@@ -182,6 +183,29 @@
       <ul id="saved-list" class="saved"></ul>
       <button class="btn">Close</button>
     </form>
+  </dialog>
+
+  <!-- Follow along: chapter text streamed from /api/text (never cached), highlighted from verse timestamps -->
+  <dialog id="dlg-follow" class="follow" aria-labelledby="follow-title">
+    <div class="follow-head">
+      <div class="follow-titles">
+        <p class="eyebrow">Follow along</p>
+        <h3 id="follow-title"></h3>
+      </div>
+      <button type="button" id="btn-follow-close" class="icon-btn" aria-label="Close follow along" title="Close">&times;</button>
+    </div>
+    <p id="follow-status" class="follow-status quiet small" role="status" aria-live="polite"></p>
+    <div id="follow-text" class="follow-text" tabindex="-1"></div>
+    <div class="follow-foot">
+      <div class="follow-ctl">
+        <button type="button" id="btn-follow-back" class="ctl" aria-label="Back 15 seconds">&#8634; 15</button>
+        <button type="button" id="btn-follow-play" class="ctl follow-play" aria-label="Play">
+          <svg id="ico-fplay" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+          <svg id="ico-fpause" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+        </button>
+      </div>
+      <p id="follow-copyright" class="small quiet follow-copy"></p>
+    </div>
   </dialog>
 
   <audio id="player" preload="auto" playsinline></audio>

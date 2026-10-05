@@ -11,11 +11,13 @@ const fn = {
   translations: require('../netlify/functions/translations').handler,
   chapter: require('../netlify/functions/chapter').handler,
   timestamps: require('../netlify/functions/timestamps').handler,
+  text: require('../netlify/functions/text').handler,
 };
+const textMod = require('../netlify/functions/text');
 const get = (qs, headers) => ({ httpMethod: 'GET', headers: headers || {}, queryStringParameters: qs || {} });
 
 test('every protected function rejects missing / bad tokens', async () => {
-  for (const name of ['translations', 'chapter', 'timestamps']) {
+  for (const name of ['translations', 'chapter', 'timestamps', 'text']) {
     let r = await fn[name](get({ fileset: 'MOCKAA', book: 'ISA', chapter: '1' }));
     assert.equal(r.statusCode, 401, name + ' without token');
     r = await fn[name](get({ fileset: 'MOCKAA', book: 'ISA', chapter: '1' }, { authorization: 'Bearer nonsense' }));
@@ -127,4 +129,106 @@ test('upstream failure never leaks the key', async () => {
     assert.equal(r.statusCode, 502);
     assert.ok(!r.body.includes('LEAKME_999'));
   } finally { global.fetch = realFetch; delete process.env.BIBLE_BRAIN_KEY; }
+});
+
+test('text: mock mode returns labelled placeholder verses and copyright; mock timestamps line up', async () => {
+  const { token } = common.issueToken();
+  const h = { authorization: 'Bearer ' + token };
+  const r = await fn.text(get({ fileset: 'MOCKAA', book: 'ISA', chapter: '2' }, h));
+  assert.equal(r.statusCode, 200);
+  assert.match(r.headers['Cache-Control'], /no-store/);
+  const b = JSON.parse(r.body);
+  assert.equal(b.mock, true);
+  assert.equal(b.chapter, 2);
+  assert.ok(b.verses.length >= 3);
+  for (const v of b.verses) assert.match(v.text, /MOCK/);
+  assert.match(b.copyright.text, /MOCK/);
+  const t = JSON.parse((await fn.timestamps(get({ fileset: 'MOCKAA', book: 'ISA', chapter: '2' }, h))).body);
+  assert.deepEqual(t.verses.filter((x) => x.verse > 0).map((x) => x.verse), b.verses.map((v) => v.verse));
+  const bad = await fn.text(get({ fileset: 'MOCKAA', book: 'ISA', chapter: '999' }, h));
+  assert.equal(bad.statusCode, 400);
+});
+
+test('text: picks the text_plain fileset covering the book testament (type/size and set_* fields)', () => {
+  const live = { filesets: { 'dbp-prod': [
+    { id: 'ENGESVO1DA', type: 'audio', size: 'OT' },
+    { id: 'ENGESVO_ET-json', type: 'text_json', size: 'OT' },
+    { id: 'ENGESVN_ET', type: 'text_plain', size: 'NT' },
+    { id: 'ENGESVO_ET', type: 'text_plain', size: 'OT' },
+    { id: 'ENGESVO_ET-usx', type: 'text_usx', size: 'OT' },
+  ] } };
+  assert.deepEqual(textMod._pickTextFilesets(live, 'ISA'), ['ENGESVO_ET']);
+  assert.deepEqual(textMod._pickTextFilesets(live, 'MAT'), ['ENGESVN_ET']);
+  const legacy = { filesets: { 'dbp-prod': [
+    { id: 'XYZABCC_ET', set_type_code: 'text_plain', set_size_code: 'C' },
+    { id: 'XYZABCO_ET', set_type_code: 'text_plain', set_size_code: 'OT' },
+    { id: 'XYZABCN_ET', set_type_code: 'text_plain', set_size_code: 'NTP' },
+  ] } };
+  assert.deepEqual(textMod._pickTextFilesets(legacy, 'JER'), ['XYZABCO_ET', 'XYZABCC_ET']);
+  assert.deepEqual(textMod._pickTextFilesets(legacy, 'JHN'), ['XYZABCC_ET', 'XYZABCN_ET']);
+  assert.deepEqual(textMod._pickTextFilesets({ filesets: {} }, 'ISA'), []);
+});
+
+test('text: live mode (stubbed) returns sorted verses without verse 0, text copyright, never the key', async () => {
+  const SECRET = 'SECRETKEY_text_777';
+  process.env.BIBLE_BRAIN_KEY = SECRET;
+  const realFetch = global.fetch;
+  const seen = [];
+  global.fetch = async (url) => {
+    const u = String(url); seen.push(u);
+    const ok = (body) => new Response(JSON.stringify(body), { status: 200 });
+    if (u.includes('/bibles/ENGESV/copyright')) return ok([
+      { id: 'ENGESVO1DA', type: 'audio', copyright: { copyright: 'Audio (c) Test', organizations: [] } },
+      { id: 'ENGESVO_ET', type: 'text_plain', copyright: { copyright: 'Text (c) Test Publisher', organizations: [{ abbreviation: 'TST' }] } },
+    ]);
+    if (u.includes('/bibles/ENGESV?')) return ok({ data: { abbr: 'ENGESV', filesets: { 'dbp-prod': [
+      { id: 'ENGESVO1DA', type: 'audio', size: 'OT' },
+      { id: 'ENGESVO_ET', type: 'text_plain', size: 'OT' },
+      { id: 'ENGESVN_ET', type: 'text_plain', size: 'NT' },
+    ] } } });
+    if (u.includes('/bibles/NOTEXT?')) return ok({ data: { abbr: 'NOTEXT', filesets: { 'dbp-prod': [{ id: 'NOTEXTO1DA', type: 'audio', size: 'OT' }] } } });
+    if (u.includes('/bibles/filesets/ENGESVO_ET/ISA/1')) return ok({ data: [
+      { book_id: 'ISA', book_name: 'Isaiah', chapter: 1, verse_start: 3, verse_end: 3, verse_text: '  Third   placeholder. ' },
+      { book_id: 'ISA', book_name: 'Isaiah', chapter: 1, verse_start: 0, verse_end: 0, verse_text: 'Heading' },
+      { book_id: 'ISA', book_name: 'Isaiah', chapter: 1, verse_start: 1, verse_end: 1, verse_text: 'First placeholder.' },
+      { book_id: 'ISA', book_name: 'Isaiah', chapter: 1, verse_start: 2, verse_end: 2, verse_text: '' },
+      { book_id: 'ISA', book_name: 'Isaiah', chapter: 1, verse_start: 4, verse_end: 5, verse_text: 'Combined placeholder.' },
+    ] });
+    if (u.includes('/bibles/filesets/ENGESVN_ET/MAT/1')) return ok({ data: [{ book_name: 'Matthew', verse_start: 1, verse_end: 1, verse_text: 'NT placeholder.' }] });
+    return new Response('{}', { status: 404 });
+  };
+  try {
+    const { token } = common.issueToken();
+    const h = { authorization: 'Bearer ' + token };
+    const r = await fn.text(get({ fileset: 'ENGESVO1DA', book: 'ISA', chapter: '1', bible: 'ENGESV' }, h));
+    assert.equal(r.statusCode, 200);
+    const b = JSON.parse(r.body);
+    assert.equal(b.mock, false);
+    assert.equal(b.textFileset, 'ENGESVO_ET');
+    assert.equal(b.bookName, 'Isaiah');
+    assert.deepEqual(b.verses.map((v) => v.verse), [1, 3, 4]);
+    assert.equal(b.verses[1].text, 'Third placeholder.');
+    assert.equal(b.verses[2].verseEnd, 5);
+    assert.equal(b.copyright.text, 'Text (c) Test Publisher');
+    assert.ok(seen.some((u) => u.includes('/bibles/filesets/ENGESVO_ET/ISA/1')));
+    assert.ok(!r.body.includes(SECRET) && !JSON.stringify(r.headers).includes(SECRET));
+
+    // NT book resolves to the NT text fileset; bible id derived from the audio fileset when omitted.
+    const n = JSON.parse((await fn.text(get({ fileset: 'ENGESVN1DA', book: 'MAT', chapter: '1' }, h))).body);
+    assert.equal(n.textFileset, 'ENGESVN_ET');
+    assert.equal(n.verses.length, 1);
+
+    // Missing chapter text -> quiet empty list, not an error.
+    const miss = JSON.parse((await fn.text(get({ fileset: 'ENGESVO1DA', book: 'ISA', chapter: '2', bible: 'ENGESV' }, h))).body);
+    assert.deepEqual(miss.verses, []);
+    assert.equal(miss.unavailable, 'not_found');
+
+    // Bible without any text_plain fileset.
+    const none = await fn.text(get({ fileset: 'NOTEXTO1DA', book: 'ISA', chapter: '1', bible: 'NOTEXT' }, h));
+    assert.equal(none.statusCode, 200);
+    assert.equal(JSON.parse(none.body).unavailable, 'no_text_fileset');
+  } finally {
+    global.fetch = realFetch;
+    delete process.env.BIBLE_BRAIN_KEY;
+  }
 });

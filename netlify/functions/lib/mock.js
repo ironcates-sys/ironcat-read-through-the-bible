@@ -22,4 +22,30 @@ function chapter({ fileset, book, chapter }) {
   };
 }
 
-module.exports = { NOTICE, TRANSLATIONS, chapter };
+// Placeholder "text" for the Follow along screen: clearly labelled, contains no Scripture.
+const MOCK_VERSES = 5;
+function text({ book, chapter }) {
+  const verses = [];
+  for (let v = 1; v <= MOCK_VERSES; v++) {
+    verses.push({ verse: v, text: 'MOCK verse ' + v + ' of ' + book + ' ' + chapter + '. Placeholder text, not Scripture.' });
+  }
+  return {
+    mock: true,
+    notice: NOTICE,
+    bookId: book,
+    bookName: book,
+    chapter,
+    textFileset: 'MOCK',
+    verses,
+    copyright: { text: 'MOCK DATA. No real Bible content. Placeholder text; no copyright.', organizations: [] },
+  };
+}
+
+// Fake verse timings spread across the 6-second mock tone so Follow along sync can be exercised.
+function timestamps() {
+  const verses = [{ verse: 0, t: 0 }];
+  for (let v = 1; v <= MOCK_VERSES; v++) verses.push({ verse: v, t: (v - 1) * 1.1 + 0.3 });
+  return { mock: true, verses };
+}
+
+module.exports = { NOTICE, TRANSLATIONS, chapter, text, timestamps };

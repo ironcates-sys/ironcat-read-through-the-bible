@@ -122,3 +122,36 @@ h4 { margin: 4px 0; font-weight: normal; font-size: 17px; color: var(--gold); le
 .choice { border: 1px solid var(--line); border-radius: 12px; margin: 10px 0 14px; padding: 6px 12px; }
 .choice legend { padding: 0 6px; }
 .eyebrow + .small { margin: 0; }
+
+/* ---------- Follow along ---------- */
+dialog.follow {
+  width: 100%; max-width: 640px; height: 100%; max-height: 100%; margin: 0 auto; padding: 0;
+  border: 0; border-left: 1px solid var(--line); border-right: 1px solid var(--line); border-radius: 0;
+  background: var(--bg);
+}
+dialog.follow[open] { display: flex; flex-direction: column; }
+.follow-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: calc(10px + env(safe-area-inset-top)) 18px 10px; border-bottom: 1px solid var(--line); background: var(--card);
+}
+.follow-head h3 { margin: 2px 0 0; font-size: 24px; }
+.follow-head .icon-btn { font-size: 32px; line-height: 1; padding: 4px 10px; }
+.follow-status { margin: 0; padding: 8px 20px 0; min-height: 0; font-family: var(--sans); }
+.follow-status:empty { display: none; }
+.follow-text {
+  flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  padding: 14px 14px 35vh; font-size: 20px; line-height: 1.6; outline: none;
+}
+.follow-text .v { margin: 0 0 4px; padding: 6px 10px; border-radius: 10px; cursor: pointer; }
+.follow-text .v sup { color: var(--gold); font-family: var(--sans); font-size: 12px; margin-right: 6px; letter-spacing: .02em; }
+.follow-text.synced .v { color: rgba(239, 232, 214, 0.82); }
+.follow-text .v.active { background: rgba(201, 179, 122, 0.16); box-shadow: inset 3px 0 0 var(--gold); color: #fff8e6; }
+.follow-text .loading { color: var(--quiet); font-family: var(--sans); font-size: 16px; text-align: center; margin-top: 30px; }
+.follow-foot { border-top: 1px solid var(--line); background: var(--card); padding: 8px 18px calc(10px + env(safe-area-inset-bottom)); text-align: center; }
+.follow-ctl { display: flex; justify-content: center; gap: 14px; }
+.follow-ctl .ctl { min-width: 76px; padding: 8px 14px; }
+.follow-play { display: flex; align-items: center; justify-content: center; background: var(--gold); color: var(--gold-ink); border-color: var(--gold); }
+.follow-play svg { width: 26px; height: 26px; fill: currentColor; }
+.follow-copy { margin: 8px 0 0; font-size: 12px; line-height: 1.4; }
+.follow-copy a { color: var(--gold); }
+@media (prefers-reduced-motion: no-preference) { .follow-text .v { transition: background-color .25s, color .25s; } }

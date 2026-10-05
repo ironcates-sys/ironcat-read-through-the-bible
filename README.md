@@ -19,6 +19,7 @@ A **private** audio Bible read-through PWA for Steve and his wife. It plays the 
 | Audio | **One** reused `<audio>` element. Each chapter's signed URL is requested from `/api/chapter` right before play; the next chapter's URL is requested ~25 s before the current one ends. |
 | Announcements | Optional short clip ("Isaiah, chapter one") played through the same audio element before each chapter; single-chapter books (Obadiah) say only the name. Toggle in Settings. If a clip is missing the app silently skips it. |
 | Translation | Picker is built from `/api/translations` at every launch (English audio filesets that include the Old Testament). Changing it applies from the next chapter. Default lives in Settings. |
+| Follow along | "Follow along" opens a full-height text screen for the chapter. Text comes from `/api/text` (the bible's matching `text_plain` fileset) and is held in memory only. While the chapter plays, the verse at the playhead (latest Bible Brain timestamp ≤ current time, verse-0 intro ignored) is highlighted and scrolled to; tapping a verse seeks there. No timings → text without sync and a quiet note; no text → a short message. Playback is never affected. The text's copyright is always shown at the bottom of the screen. |
 | Legal | The playing translation's copyright text (from Bible Brain) and a link to the Bible Brain terms are always shown at the bottom. |
 
 ### API (all under `/api/*`, every function checks the token itself)
@@ -26,7 +27,8 @@ A **private** audio Bible read-through PWA for Steve and his wife. It plays the 
 - `POST /api/auth` `{passcode}` → `{token, expiresAt}` (token = HMAC-signed, 30 days; changing `ACCESS_PASSCODE` invalidates all tokens)
 - `GET /api/translations` → translation list
 - `GET /api/chapter?fileset=&book=&chapter=&bible=` → `{audioUrl, duration, copyright, bookName, ...}` only
-- `GET /api/timestamps?fileset=&book=&chapter=` → verse start times (used by "Save this verse")
+- `GET /api/timestamps?fileset=&book=&chapter=` → verse start times (used by "Save this verse" and Follow along)
+- `GET /api/text?fileset=&book=&chapter=&bible=` → `{textFileset, bookName, verses:[{verse, verseEnd?, text}], copyright}`. `fileset` is the *audio* fileset; the server picks the bible's `text_plain` fileset covering the book's testament (e.g. ESV: `ENGESVO_ET` for OT, `ENGESVN_ET` for NT). Returns an empty `verses` list with `unavailable` when there is no text.
 
 All responses carry `Cache-Control: no-store`. The key is used only inside the functions and is scrubbed from any error text.
 Without `BIBLE_BRAIN_KEY` the functions return clearly labelled **MOCK** data (a generated test tone, `mock: true`, and a banner in the UI).
@@ -114,6 +116,7 @@ Install to Home Screen first (Safari → Share → Add to Home Screen), then ope
 - [ ] Mark day read / not read, Jump to a day, Skip to today after a couple of days away.
 - [ ] Custom plan: download the template from Settings, edit it, upload it, check the preview, accept; then Reset to default plan.
 - [ ] Save this verse → appears under ★ Saved (reference only, no text).
+- [ ] Follow along: open while playing → current verse highlighted and kept in view; seek / ↺ 15 moves the highlight; tap a verse jumps the audio; close → playback continues; lock screen still works.
 - [ ] Switch translation mid-chapter: current chapter keeps playing; the next chapter uses the new one.
 - [ ] After a long pause (> 1 day) signed URLs expire, but the app resolves a fresh URL on resume/next play.
 
@@ -136,7 +139,7 @@ Install to Home Screen first (Safari → Share → Add to Home Screen), then ope
 ## Layout
 ```
 netlify.toml
-netlify/functions/   auth.js translations.js chapter.js timestamps.js lib/{common,mock}.js
+netlify/functions/   auth.js translations.js chapter.js timestamps.js text.js lib/{common,copyright,mock}.js
 public/              index.html sw.js manifest.webmanifest robots.txt css/ js/{app,queue,plan,version}.js
                      data/plan.json announce/*.mp3 icons/ mock/tone.mp3
 data/                prophets-daily-reading-plan.csv

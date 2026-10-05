@@ -172,6 +172,8 @@
     var showPause = playing || busy;
     $('ico-play').toggleAttribute('hidden', showPause); $('ico-pause').toggleAttribute('hidden', !showPause);  // SVG has no .hidden property
     $('btn-play').setAttribute('aria-label', showPause ? 'Pause' : 'Play');
+    $('ico-fplay').toggleAttribute('hidden', showPause); $('ico-fpause').toggleAttribute('hidden', !showPause);
+    $('btn-follow-play').setAttribute('aria-label', showPause ? 'Pause' : 'Play');
     if ('mediaSession' in navigator) navigator.mediaSession.playbackState = showPause ? 'playing' : (phase === 'idle' ? 'none' : 'paused');
   }
 
@@ -191,11 +193,20 @@
 
   // ---------- chapter resolution + prefetch ----------
   function keyFor(it, tr) { return tr + '|' + it.bookId + '|' + it.chapter; }
-  function fetchChapter(it, tr) {
+  function refQuery(it, tr) {
     var meta = translations.filter(function (t) { return t.id === tr; })[0] || {};
-    var q = '/api/chapter?fileset=' + encodeURIComponent(tr) + '&book=' + it.bookId + '&chapter=' + it.chapter +
+    return '?fileset=' + encodeURIComponent(tr) + '&book=' + it.bookId + '&chapter=' + it.chapter +
       (meta.bibleId ? '&bible=' + encodeURIComponent(meta.bibleId) : '');
-    return api(q);
+  }
+  function fetchChapter(it, tr) { return api('/api/chapter' + refQuery(it, tr)); }
+  // Verse start times for the playing chapter (shared by "Save this verse" and Follow along).
+  function chapterTimestamps(it, tr) {
+    if (!verseCache) {
+      verseCache = api('/api/timestamps?fileset=' + encodeURIComponent(tr) + '&book=' + it.bookId + '&chapter=' + it.chapter);
+      var mine = verseCache;
+      mine.catch(function () { if (verseCache === mine) verseCache = null; });   // allow a retry later
+    }
+    return verseCache;
   }
   function resolveChapter(it, tr) {
     var k = keyFor(it, tr);
@@ -242,12 +253,13 @@
     var it = currentItem();
     var tr = sessionTranslation;
     verseCache = null; prefetchedFor = -1; retriedUrl = false;
-    current = { day: state.day, pos: state.pos, item: it, meta: null };
+    current = { day: state.day, pos: state.pos, item: it, tr: tr, meta: null };
     phase = 'loading';
     render();
     var metaP = resolveChapter(it, tr);
     metaP.catch(function () { /* handled in finishResolve */ });
     pending = { token: token, metaP: metaP, resume: resume };
+    if (followIsOpen()) { loadFollow(it, tr); renderFollow(); }
     var useAnnounce = settings.announce && !(resume > 2);
     if (useAnnounce) {
       phase = 'announce';
@@ -288,6 +300,9 @@
     setCopyright(meta);
     setMediaMetadata();
     updateNow(); updatePlayIcon();
+    // Prefetch text + timings for Follow along (in memory only) so it is ready when opened.
+    loadFollow(current.item, meta.translation.id);
+    renderFollow();
   }
 
   function stopPlayback() {
@@ -366,7 +381,9 @@
     maybePrefetch();
     checkSleep();
     updatePosition();
+    syncFollow(false);
   });
+  audio.addEventListener('seeked', function () { syncFollow(true); });
 
   function persistPosition(force) {
     if (phase !== 'chapter') return;
@@ -578,11 +595,9 @@
       toast('Saved ' + it.book + ' ' + it.chapter + (verse ? ':' + verse : '') + '.');
     }
     if (phase !== 'chapter' || (current.meta && current.meta.mock)) { commit(null); return; }
-    var p = verseCache || api('/api/timestamps?fileset=' + encodeURIComponent(tr) + '&book=' + it.bookId + '&chapter=' + it.chapter);
-    p.then(function (r) {
-      verseCache = Promise.resolve(r);
+    chapterTimestamps(it, tr).then(function (r) {
       var v = null;
-      (r.verses || []).forEach(function (x) { if (x.t <= pos) v = x.verse; });
+      (r.verses || []).forEach(function (x) { if (x.t <= pos && x.verse > 0) v = x.verse; });
       commit(v);
     }, function () { commit(null); });
   });
@@ -599,6 +614,192 @@
       li.appendChild(span); li.appendChild(rm); ul.appendChild(li);
     });
     $('dlg-saved').showModal();
+  });
+
+
+  // ---------- follow along (live text) ----------
+  // Text comes from /api/text per chapter and lives only in memory (never localStorage / SW cache).
+  var follow = null;            // { key, it, tr, text, textErr, ts, tsErr, tsPending }
+  var followActive = null;      // verse number currently highlighted
+  var followEls = [];           // [{ from, to, el }] in verse order for the rendered chapter
+  var followRenderedKey = null;
+  var followUserScrollAt = 0;
+  var FOLLOW_LEAD = 0.15;       // seconds: highlight a hair early so it feels in step with the voice
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function followIsOpen() { return $('dlg-follow').open; }
+  function followTarget() {
+    if (current && phase !== 'idle') return { it: current.item, tr: current.meta ? current.meta.translation.id : current.tr };
+    return { it: currentItem(), tr: sessionTranslation };
+  }
+  function loadFollow(it, tr) {
+    if (!it || !tr) return;
+    var key = keyFor(it, tr);
+    if (follow && follow.key === key && !follow.textErr) {
+      if (!follow.ts && !follow.tsPending && isPlayingKey(key)) fetchFollowTimes(follow);
+      return;
+    }
+    var f = follow = { key: key, it: it, tr: tr, text: null, textErr: null, ts: null, tsErr: false, tsPending: false };
+    api('/api/text' + refQuery(it, tr)).then(function (r) {
+      if (follow !== f) return;
+      f.text = r; renderFollow();
+    }, function (e) {
+      if (follow !== f) return;
+      f.textErr = e.message || 'Could not load the text.'; renderFollow();
+    });
+    if (isPlayingKey(key)) fetchFollowTimes(f);
+  }
+  function isPlayingKey(key) {
+    return !!(current && current.meta && phase === 'chapter' && keyFor(current.item, current.meta.translation.id) === key);
+  }
+  function fetchFollowTimes(f) {
+    f.tsErr = false; f.tsPending = true;
+    chapterTimestamps(f.it, f.tr).then(function (r) {
+      f.tsPending = false;
+      if (follow !== f) return;
+      f.ts = (r.verses || [])
+        .filter(function (x) { return x.verse > 0 && isFinite(x.t); })   // ignore the verse-0 intro
+        .sort(function (a, b) { return a.t - b.t; });
+      renderFollow();
+    }, function () {
+      f.tsPending = false;
+      if (follow !== f) return;
+      f.tsErr = true; renderFollow();
+    });
+  }
+
+  function followCopyright(f) {
+    var el = $('follow-copyright');
+    el.textContent = '';
+    var c = (f && f.text && f.text.copyright) || {};
+    var meta = current && current.meta && f && isPlayingKey(f.key) ? current.meta : null;
+    if (!c.text && meta && meta.copyright && meta.copyright.text) c = meta.copyright;   // fall back to the chapter's copyright
+    var parts = [];
+    if (f && f.text && f.text.mock) parts.push('MOCK DATA \u2014 not Bible content.');
+    var name = f ? translationName(f.tr) : '';
+    if (name) parts.push(name + '.');
+    if (c.text) parts.push(c.text);
+    if (c.organizations && c.organizations.length) parts.push(c.organizations.map(function (o) { return o.name; }).join(', ') + '.');
+    if (!c.text && !(f && f.text && f.text.mock)) parts.push('Copyright information for this translation is available via the Bible Brain terms.');
+    el.appendChild(document.createTextNode(parts.join(' ') + ' Text streamed from Bible Brain. '));
+    var a = document.createElement('a');
+    a.href = termsUrl; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = 'Bible Brain terms';
+    el.appendChild(a);
+  }
+
+  function renderFollow() {
+    if (!followIsOpen()) return;
+    var f = follow;
+    var box = $('follow-text'), status = $('follow-status');
+    var tgt = followTarget();
+    var title = f ? ((f.text && f.text.bookName && f.text.bookName !== f.it.bookId ? f.text.bookName : f.it.book) + ' ' + f.it.chapter) : label(tgt.it);
+    $('follow-title').textContent = title;
+    followCopyright(f);
+
+    if (!f || (!f.text && !f.textErr)) {
+      if (followRenderedKey !== 'loading') {
+        box.innerHTML = '';
+        var p = document.createElement('p'); p.className = 'loading';
+        p.textContent = f ? 'Loading the text\u2026' : 'Choose a translation to see the text.';
+        box.appendChild(p);
+        followRenderedKey = 'loading'; followEls = []; followActive = null;
+      }
+      status.textContent = '';
+      return;
+    }
+    if (f.textErr || !f.text.verses || !f.text.verses.length) {
+      box.innerHTML = '';
+      var q = document.createElement('p'); q.className = 'loading';
+      q.textContent = f.textErr ? f.textErr + ' Playback is not affected.' : 'Text isn\u2019t available for this chapter in this translation. Playback is not affected.';
+      box.appendChild(q);
+      followRenderedKey = 'empty:' + f.key; followEls = []; followActive = null;
+      status.textContent = '';
+      return;
+    }
+    if (followRenderedKey !== f.key) {
+      box.innerHTML = ''; followEls = []; followActive = null;
+      var frag = document.createDocumentFragment();
+      f.text.verses.forEach(function (v) {
+        var el = document.createElement('p');
+        el.className = 'v';
+        el.setAttribute('data-verse', v.verse);
+        var sup = document.createElement('sup');
+        sup.textContent = v.verseEnd ? v.verse + '\u2013' + v.verseEnd : v.verse;
+        el.appendChild(sup);
+        el.appendChild(document.createTextNode(v.text));
+        frag.appendChild(el);
+        followEls.push({ from: v.verse, to: v.verseEnd || v.verse, el: el });
+      });
+      box.appendChild(frag);
+      box.scrollTop = 0;
+      followRenderedKey = f.key;
+    }
+    var playing = isPlayingKey(f.key);
+    var synced = playing && f.ts && f.ts.length > 0;
+    box.classList.toggle('synced', !!synced);
+    if (!playing) status.textContent = phase === 'idle' ? 'Press play to follow along.' : '';
+    else if (f.ts === null && !f.tsErr) status.textContent = '';
+    else if (!synced) status.textContent = 'Timing unavailable for this recording \u2014 showing the text without sync.';
+    else status.textContent = '';
+    syncFollow(true);
+  }
+
+  // Latest timestamp at or before the playhead -> verse number (null before verse 1 starts).
+  function verseAt(ts, time) {
+    var v = null;
+    for (var i = 0; i < ts.length; i++) { if (ts[i].t <= time + FOLLOW_LEAD) v = ts[i].verse; else break; }
+    return v;
+  }
+  function elForVerse(v) {
+    var best = null;
+    for (var i = 0; i < followEls.length; i++) {
+      var e = followEls[i];
+      if (v >= e.from && v <= e.to) return e.el;
+      if (e.from <= v) best = e.el;
+    }
+    return best;
+  }
+  function syncFollow(force) {
+    if (!follow || !followIsOpen() || followRenderedKey !== follow.key) return;
+    var v = null;
+    if (follow.ts && follow.ts.length && isPlayingKey(follow.key)) v = verseAt(follow.ts, audio.currentTime || 0);
+    if (v === followActive && !force) return;
+    var prevEl = followActive != null ? elForVerse(followActive) : null;
+    var el = v != null ? elForVerse(v) : null;
+    if (prevEl && prevEl !== el) prevEl.classList.remove('active');
+    followActive = v;
+    if (!el) return;
+    el.classList.add('active');
+    var userScrolling = Date.now() - followUserScrollAt < 6000;
+    if (force || !userScrolling) {
+      try { el.scrollIntoView({ block: 'center', behavior: force || reduceMotion ? 'auto' : 'smooth' }); } catch (e) { el.scrollIntoView(); }
+    }
+  }
+
+  function openFollow() {
+    var tgt = followTarget();
+    var dlg = $('dlg-follow');
+    if (!dlg.open) dlg.showModal();
+    followRenderedKey = null;
+    loadFollow(tgt.it, tgt.tr);
+    renderFollow();
+    $('btn-follow-close').focus();
+  }
+  $('btn-follow').addEventListener('click', openFollow);
+  $('btn-follow-close').addEventListener('click', function () { $('dlg-follow').close(); });
+  $('btn-follow-play').addEventListener('click', togglePlay);
+  $('btn-follow-back').addEventListener('click', skipBack);
+  ['wheel', 'touchmove'].forEach(function (ev) {
+    $('follow-text').addEventListener(ev, function () { followUserScrollAt = Date.now(); }, { passive: true });
+  });
+  // Tap a verse to jump the audio there (when this chapter is playing and timings exist).
+  $('follow-text').addEventListener('click', function (e) {
+    var el = e.target.closest && e.target.closest('.v');
+    if (!el || !follow || !follow.ts || !follow.ts.length || !isPlayingKey(follow.key)) return;
+    var n = Number(el.getAttribute('data-verse'));
+    for (var i = 0; i < follow.ts.length; i++) {
+      if (follow.ts[i].verse >= n) { audio.currentTime = follow.ts[i].t; followUserScrollAt = 0; return; }
+    }
   });
 
   // ---------- settings ----------

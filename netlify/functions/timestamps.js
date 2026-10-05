@@ -1,12 +1,13 @@
 'use strict';
 // GET /api/timestamps?fileset=..&book=..&chapter=..  -> { verses: [{ verse, t }] }
-// Optional helper so "save this verse" can record a verse number. Best effort:
+// Used by "save this verse" and the Follow along screen. Best effort:
 // returns an empty list when a fileset has no timing data.
 const { json, isMock, withAuth, bbFetch, validateRef } = require('./lib/common');
+const mock = require('./lib/mock');
 
 exports.handler = withAuth(['GET'], async (event) => {
   const ref = validateRef(event.queryStringParameters || {});
-  if (isMock()) return json(200, { mock: true, verses: [] });
+  if (isMock()) return json(200, mock.timestamps()); // fake timings for the mock tone
   let verses = [];
   try {
     const res = await bbFetch('/timestamps/' + encodeURIComponent(ref.fileset) + '/' + ref.book + '/' + ref.chapter);
