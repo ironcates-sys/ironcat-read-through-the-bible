@@ -756,7 +756,7 @@
     setupMediaSession();
     var saved = load(LS_SETTINGS);
     if (saved) settings = Object.assign(settings, saved);
-    if (!(settings.speed >= 0.75 && settings.speed <= 1.5)) settings.speed = 1;
+    if (!(settings.speed >= 0.75 && settings.speed <= 2)) settings.speed = 1;
     fetch('/data/plan.json').then(function (r) { return r.json(); }).then(function (p) {
       defaultPlan = p;
       var stored = load(LS_PLAN), custom = stored ? Plan.fromStored(stored) : null;
