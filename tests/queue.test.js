@@ -120,3 +120,30 @@ test('pushLog keeps last N; short clips skipped when hidden', () => {
   assert.equal(Q.useShortClips(true), false);
   assert.equal(Q.useShortClips(false), true);
 });
+
+test('prefetch key is exact fileset + book + chapter', () => {
+  assert.equal(Q.prefetchKey('ENGESVO1DA', 'DAN', 2), 'ENGESVO1DA|DAN|2');
+  assert.equal(Q.prefetchKey('ENGESVO1DA', 'DAN', '2'), Q.prefetchKey('ENGESVO1DA', 'DAN', 2));
+  assert.notEqual(Q.prefetchKey('ENGESVO1DA', 'EZK', 2), Q.prefetchKey('ENGESVO1DA', 'DAN', 2));
+  assert.notEqual(Q.prefetchKey('ENGESVO1DA', 'DAN', 2), Q.prefetchKey('ENGESVO2DA', 'DAN', 2));
+  assert.notEqual(Q.prefetchKey('ENGESVO1DA', 'DAN', 1), Q.prefetchKey('ENGESVO1DA', 'DAN', 12));
+});
+
+test('server answer must match the requested chapter', () => {
+  const meta = { translation: { id: 'ENGESVO1DA' }, bookId: 'DAN', chapter: 2, audioUrl: 'https://x/A27___02_Daniel.mp3' };
+  assert.ok(Q.metaMatches(meta, 'ENGESVO1DA', 'DAN', 2));
+  assert.ok(!Q.metaMatches(meta, 'ENGESVO1DA', 'EZK', 2));
+  assert.ok(!Q.metaMatches(meta, 'ENGESVO1DA', 'DAN', 3));
+  assert.ok(!Q.metaMatches(meta, 'ENGNIVO1DA', 'DAN', 2));
+  assert.ok(!Q.metaMatches(null, 'ENGESVO1DA', 'DAN', 2));
+});
+
+test('preloaded standby is used only for the same chapter and same URL', () => {
+  const key = Q.prefetchKey('ENGESVO1DA', 'DAN', 2), url = 'https://cdn/A27___02_Daniel.mp3?sig=1';
+  assert.ok(Q.preloadMatches({ key, url }, key, url));
+  assert.ok(!Q.preloadMatches({ key, url }, Q.prefetchKey('ENGESVO1DA', 'EZK', 2), url));
+  assert.ok(!Q.preloadMatches({ key, url: 'https://cdn/A26___02_Ezekiel.mp3?sig=1' }, key, url));
+  assert.ok(!Q.preloadMatches({ key, url }, key, 'https://cdn/A27___02_Daniel.mp3?sig=2'));
+  assert.ok(!Q.preloadMatches({}, key, url));
+  assert.ok(!Q.preloadMatches({ key, url }, undefined, url));
+});

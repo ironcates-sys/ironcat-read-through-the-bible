@@ -1,11 +1,23 @@
 /* Read Through the Bible: front end. Plain JS, no framework.
- * ONE <audio> element is reused for everything (announcement clip, chapter, pause silence). */
+ * Two <audio> elements (A/B): `audio` is the active one; `standby` preloads the next chapter so the
+ * chapter change is a same-task play() on an element that is already buffered (Android screen-off fix). */
 (function () {
   'use strict';
 
   var Q = window.Queue;
   var $ = function (id) { return document.getElementById(id); };
   var audio = $('player');
+  var standby = audio.cloneNode(false);
+  standby.id = 'player-b';
+  audio.parentNode.appendChild(standby);
+  audio.dataset.name = 'A'; standby.dataset.name = 'B';
+  var players = [audio, standby];
+  // Listen on both elements, but only react to events from whichever one is active right now.
+  function onAudio(name, fn) {
+    players.forEach(function (el) {
+      el.addEventListener(name, function (e) { if (el === audio) return fn.call(el, e); });
+    });
+  }
 
   var LS_TOKEN = 'ironcat.token.v1';
   var LS_STATE = 'ironcat.state.v1';
@@ -19,7 +31,7 @@
   var usingCustom = false;
   var len = 66;
   var state = null;
-  var settings = { translation: 'ENGESVO1DA', announce: true, pause: 0, speed: 1 };
+  var settings = { translation: 'ENGESVO1DA', announce: true, pause: 0, speed: 1, wakeLock: false };
   var translations = [];
   var mockMode = false;
   var sessionTranslation = '';      // what the picker shows; changes apply from the next chapter
@@ -175,7 +187,24 @@
     $('ico-fplay').toggleAttribute('hidden', showPause); $('ico-fpause').toggleAttribute('hidden', !showPause);
     $('btn-follow-play').setAttribute('aria-label', showPause ? 'Pause' : 'Play');
     if ('mediaSession' in navigator) navigator.mediaSession.playbackState = showPause ? 'playing' : (phase === 'idle' ? 'none' : 'paused');
+    syncWakeLock(showPause);
   }
+  // Optional: keep the screen on while playing (Screen Wake Lock API). Released on pause/idle.
+  var wakeLock = null;
+  function syncWakeLock(active) {
+    var want = !!(settings.wakeLock && active && !document.hidden && 'wakeLock' in navigator);
+    if (want && !wakeLock) {
+      wakeLock = 'pending';
+      navigator.wakeLock.request('screen').then(function (l) {
+        wakeLock = l;
+        l.addEventListener('release', function () { if (wakeLock === l) wakeLock = null; });
+        if (!settings.wakeLock) { l.release(); }
+      }, function () { wakeLock = null; });
+    } else if (!want && wakeLock && wakeLock !== 'pending' && !document.hidden) {
+      var l = wakeLock; wakeLock = null; l.release().catch(function () {});
+    }
+  }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) updatePlayIcon(); });
 
   function setCopyright(meta) {
     var el = $('copyright');
@@ -192,7 +221,7 @@
   }
 
   // ---------- chapter resolution + prefetch ----------
-  function keyFor(it, tr) { return tr + '|' + it.bookId + '|' + it.chapter; }
+  function keyFor(it, tr) { return Q.prefetchKey(tr, it.bookId, it.chapter); }
   function refQuery(it, tr) {
     var meta = translations.filter(function (t) { return t.id === tr; })[0] || {};
     return '?fileset=' + encodeURIComponent(tr) + '&book=' + it.bookId + '&chapter=' + it.chapter +
@@ -240,13 +269,50 @@
     var tr = sessionTranslation;
     var p = fetchChapter(it, tr);
     p.catch(function () { prefetchedFor = -1; /* retried near the end or at play time */ });
-    prefetch[keyFor(it, tr)] = track(p);
+    var k = keyFor(it, tr), t = track(p);
+    prefetch[k] = t;
+    p.then(function (meta) {
+      if (prefetch[k] !== t || !meta || !meta.audioUrl) return;
+      if (!Q.metaMatches(meta, tr, it.bookId, it.chapter)) { plog('prefetch-mismatch', k); delete prefetch[k]; return; }
+      preloadStandby(k, meta.audioUrl);
+    }, function () {});
+  }
+  // Buffer the next chapter in the idle element so the change needs no network and no src swap.
+  function preloadStandby(key, url) {
+    try {
+      standby.pause();
+      standby.loop = false;
+      standby.preload = 'auto';
+      standby.src = url;
+      standby.dataset.key = key; standby.dataset.url = url;
+      standby.load();
+      plog('preload ' + standby.dataset.name, key + ' ' + shortUrl(url));
+    } catch (e) { plog('preload-failed', e && e.name); }
   }
 
   // ---------- playback ----------
-  function setSrc(url) {
-    audio.loop = false;
-    audio.src = url;
+  function shortUrl(u) { return String(u || '').split('?')[0].split('/').slice(-2).join('/'); }
+  // key: the exact translation|book|chapter the url is for (chapters only). If the standby element
+  // already buffered that same chapter + URL, make it the active element instead of swapping src.
+  function setSrc(url, key) {
+    if (key && Q.preloadMatches({ key: standby.dataset.key, url: standby.dataset.url }, key, url) && !standby.error) {
+      var old = audio;
+      audio = standby; standby = old;
+      try { old.pause(); } catch (e) { /* ignore */ }
+      delete old.dataset.key; delete old.dataset.url;
+      audio.loop = false;
+      plog('swap->' + audio.dataset.name, 'ready=' + audio.readyState);
+      if (audio.readyState >= 1) {
+        if (resumeAt > 0 && resumeAt < (audio.duration || Infinity) - 2) audio.currentTime = resumeAt;
+        else if (audio.currentTime) audio.currentTime = 0;
+        resumeAt = 0;
+        $('t-dur').textContent = fmt(audio.duration);
+      }
+    } else {
+      audio.loop = false;
+      audio.src = url;
+      delete audio.dataset.key; delete audio.dataset.url;
+    }
     audio.defaultPlaybackRate = settings.speed;
     audio.playbackRate = settings.speed;
   }
@@ -259,14 +325,28 @@
       localStorage.setItem(LS_PLOG, JSON.stringify(Q.pushLog(JSON.parse(localStorage.getItem(LS_PLOG) || '[]'), (d.getMonth() + 1) + '/' + d.getDate() + ' ' + e, 150)));
     } catch (x) { /* ignore */ }
   }
-  ['ended', 'playing', 'pause', 'stalled', 'waiting', 'emptied'].forEach(function (n) { audio.addEventListener(n, function () { plog(n); }); });
+  ['ended', 'playing', 'pause', 'stalled', 'waiting', 'emptied', 'suspend', 'ratechange'].forEach(function (n) {
+    onAudio(n, function () { plog(n + ' ' + audio.dataset.name, n === 'ratechange' ? 'rate=' + audio.playbackRate : ''); });
+  });
+  onAudio('loadedmetadata', function () { plog('loadedmetadata ' + audio.dataset.name, 'dur=' + Math.round(audio.duration || 0)); });
+  var lastTuLog = 0;
+  onAudio('timeupdate', function () {
+    var n = Date.now();
+    if (n - lastTuLog < 15000) return;
+    lastTuLog = n;
+    plog('t ' + audio.dataset.name, Math.round(audio.currentTime) + '/' + Math.round(audio.duration || 0) + 's x' + audio.playbackRate);
+  });
+  players.forEach(function (el) {   // the idle element's buffering problems are worth seeing too
+    el.addEventListener('error', function () { if (el !== audio) plog('standby-error ' + el.dataset.name, el.error ? 'code=' + el.error.code : ''); });
+  });
   document.addEventListener('visibilitychange', function () { plog('visibility ' + document.visibilityState); });
   document.addEventListener('freeze', function () { plog('freeze'); });
   document.addEventListener('resume', function () { plog('resume'); });
   window.addEventListener('pagehide', function () { plog('pagehide'); });
 
   function tryPlay() {
-    plog('play()', (audio.currentSrc || audio.src || '').split('?')[0].split('/').slice(-2).join('/'));
+    // audio.src (not currentSrc, which only updates later) = the URL just assigned.
+    plog('play() ' + audio.dataset.name, shortUrl(audio.src) + (phase === 'chapter' && current ? ' want=' + keyFor(current.item, current.tr) : ''));
     var p = audio.play();
     if (p && p.catch) p.catch(function (e) {
       plog('play-rejected', e && e.name);
@@ -332,7 +412,7 @@
     if (meta.mock && !mockMode) { mockMode = true; showMockBanner(meta.notice); }
     phase = 'chapter';
     resumeAt = resume > 2 ? resume : 0;
-    setSrc(meta.audioUrl);
+    setSrc(meta.audioUrl, keyFor(current.item, current.tr));
     tryPlay();
     setCopyright(meta);
     setMediaMetadata();
@@ -372,7 +452,7 @@
     }
   }
 
-  audio.addEventListener('ended', function () {
+  onAudio('ended', function () {
     if (phase === 'announce') { finishResolve(playToken); return; }
     if (phase === 'chapter') { onChapterEnded(); return; }
     if (phase === 'pause') {
@@ -383,8 +463,8 @@
     if (phase === 'loading') { audio.currentTime = 0; tryPlay(); }   // safety if loop is unsupported
   });
 
-  audio.addEventListener('error', function () {
-    plog('error', audio.error ? 'code=' + audio.error.code : '');
+  onAudio('error', function () {
+    plog('error ' + audio.dataset.name, audio.error ? 'code=' + audio.error.code : '');
     if (phase === 'announce') { finishResolve(playToken); return; }       // graceful: skip the clip
     if (phase === 'pause') { startItem(0); return; }
     if (phase === 'loading') { return; }
@@ -403,17 +483,17 @@
     }
   });
 
-  audio.addEventListener('loadedmetadata', function () {
+  onAudio('loadedmetadata', function () {
     if (phase === 'chapter' && resumeAt > 0 && resumeAt < (audio.duration || Infinity) - 2) { audio.currentTime = resumeAt; }
     resumeAt = 0;
     $('t-dur').textContent = phase === 'chapter' ? fmt(audio.duration) : '0:00';
     updatePosition();
   });
-  audio.addEventListener('play', updatePlayIcon);
-  audio.addEventListener('pause', function () { updatePlayIcon(); persistPosition(true); });
-  audio.addEventListener('playing', updatePlayIcon);
+  onAudio('play', updatePlayIcon);
+  onAudio('pause', function () { updatePlayIcon(); persistPosition(true); });
+  onAudio('playing', updatePlayIcon);
 
-  audio.addEventListener('timeupdate', function () {
+  onAudio('timeupdate', function () {
     $('t-cur').textContent = fmt(audio.currentTime);
     if (audio.duration && isFinite(audio.duration)) {
       $('seek').value = Math.round((audio.currentTime / audio.duration) * 1000);
@@ -425,7 +505,7 @@
     updatePosition();
     syncFollow(false);
   });
-  audio.addEventListener('seeked', function () { syncFollow(true); });
+  onAudio('seeked', function () { syncFollow(true); });
 
   function persistPosition(force) {
     if (phase !== 'chapter') return;
@@ -848,6 +928,7 @@
   $('btn-settings').addEventListener('click', function () {
     $('set-announce').checked = settings.announce;
     $('set-pause').value = String(settings.pause);
+    $('set-wakelock').checked = !!settings.wakeLock;
     var lg = []; try { lg = JSON.parse(localStorage.getItem(LS_PLOG) || '[]'); } catch (e) { /* ignore */ }
     $('playlog').textContent = lg.length ? lg.slice().reverse().join('\n') : 'Nothing logged yet.';
     $('app-version').textContent = typeof APP_VERSION !== 'undefined' ? APP_VERSION : '';
@@ -857,6 +938,7 @@
   $('btn-playlog-clear').addEventListener('click', function () { localStorage.removeItem(LS_PLOG); $('playlog').textContent = 'Nothing logged yet.'; });
   $('set-announce').addEventListener('change', function () { settings.announce = this.checked; saveSettings(); });
   $('set-pause').addEventListener('change', function () { settings.pause = Number(this.value) || 0; saveSettings(); });
+  $('set-wakelock').addEventListener('change', function () { settings.wakeLock = this.checked; saveSettings(); updatePlayIcon(); });
   $('btn-newcycle').addEventListener('click', function () {
     if (!confirm('Start a new cycle from Day 1? Your finished days for this cycle stay on record.')) return;
     stopPlayback();

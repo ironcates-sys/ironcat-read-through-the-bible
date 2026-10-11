@@ -228,7 +228,23 @@
   // session (and lets the page be frozen) for clips under ~5s, so the next chapter never starts.
   function useShortClips(hidden) { return !hidden; }
 
+  // Prefetch / preload identity: exact fileset + book + chapter.
+  function prefetchKey(fileset, bookId, chapter) { return String(fileset) + '|' + String(bookId) + '|' + Number(chapter); }
+  // Did the server answer for the chapter we asked for? (Only checks fields it returns.)
+  function metaMatches(meta, fileset, bookId, chapter) {
+    if (!meta) return false;
+    if (meta.bookId && meta.bookId !== bookId) return false;
+    if (meta.book_id && meta.book_id !== bookId) return false;
+    if (meta.chapter != null && Number(meta.chapter) !== Number(chapter)) return false;
+    var fs = meta.fileset || meta.filesetId || (meta.translation && meta.translation.id);
+    if (fs && fs !== fileset) return false;
+    return true;
+  }
+  // Use the preloaded standby element only for the very same chapter AND the very same URL.
+  function preloadMatches(pre, key, url) { return !!(pre && pre.key && pre.url && key && url && pre.key === key && pre.url === url); }
+
   return {
+    prefetchKey: prefetchKey, metaMatches: metaMatches, preloadMatches: preloadMatches,
     pushLog: pushLog, useShortClips: useShortClips,
     prefetchFresh: prefetchFresh,
     ITEMS_PER_DAY: ITEMS_PER_DAY,
