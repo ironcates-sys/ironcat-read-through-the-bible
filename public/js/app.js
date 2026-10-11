@@ -250,9 +250,26 @@
     audio.defaultPlaybackRate = settings.speed;
     audio.playbackRate = settings.speed;
   }
+  // ---------- private playback log (this device only, last 150 events) ----------
+  var LS_PLOG = 'ironcat.playlog';
+  function plog(ev, extra) {
+    try {
+      var d = new Date(), e = d.toTimeString().slice(0, 8) + ' ' + ev + ' ph=' + phase + (current ? ' ' + current.item.bookId + current.item.chapter : '') +
+        (document.hidden ? ' hidden' : '') + (extra ? ' ' + extra : '');
+      localStorage.setItem(LS_PLOG, JSON.stringify(Q.pushLog(JSON.parse(localStorage.getItem(LS_PLOG) || '[]'), (d.getMonth() + 1) + '/' + d.getDate() + ' ' + e, 150)));
+    } catch (x) { /* ignore */ }
+  }
+  ['ended', 'playing', 'pause', 'stalled', 'waiting', 'emptied'].forEach(function (n) { audio.addEventListener(n, function () { plog(n); }); });
+  document.addEventListener('visibilitychange', function () { plog('visibility ' + document.visibilityState); });
+  document.addEventListener('freeze', function () { plog('freeze'); });
+  document.addEventListener('resume', function () { plog('resume'); });
+  window.addEventListener('pagehide', function () { plog('pagehide'); });
+
   function tryPlay() {
+    plog('play()', (audio.currentSrc || audio.src || '').split('?')[0].split('/').slice(-2).join('/'));
     var p = audio.play();
     if (p && p.catch) p.catch(function (e) {
+      plog('play-rejected', e && e.name);
       if (e && e.name === 'NotAllowedError') { phase = phase === 'idle' ? 'idle' : phase; toast('Tap Play to begin.'); }
       updatePlayIcon();
     });
@@ -276,7 +293,7 @@
     pending = { token: token, res: res, resume: resume };
     if (followIsOpen()) { loadFollow(it, tr); renderFollow(); }
     setMediaMetadata();
-    var useAnnounce = settings.announce && !(resume > 2);
+    var useAnnounce = settings.announce && !(resume > 2) && Q.useShortClips(document.hidden);
     if (useAnnounce) {
       phase = 'announce';
       setSrc('/announce/' + Q.clipName(it.bookId, it.chapter, isSingle(it)));
@@ -346,7 +363,7 @@
       return;
     }
     render();
-    if (settings.pause > 0) {
+    if (settings.pause > 0 && Q.useShortClips(document.hidden)) {
       phase = 'pause'; pauseLeft = settings.pause;
       setSrc('/announce/silence.mp3');
       tryPlay(); updateNow();
@@ -367,6 +384,7 @@
   });
 
   audio.addEventListener('error', function () {
+    plog('error', audio.error ? 'code=' + audio.error.code : '');
     if (phase === 'announce') { finishResolve(playToken); return; }       // graceful: skip the clip
     if (phase === 'pause') { startItem(0); return; }
     if (phase === 'loading') { return; }
@@ -830,9 +848,13 @@
   $('btn-settings').addEventListener('click', function () {
     $('set-announce').checked = settings.announce;
     $('set-pause').value = String(settings.pause);
+    var lg = []; try { lg = JSON.parse(localStorage.getItem(LS_PLOG) || '[]'); } catch (e) { /* ignore */ }
+    $('playlog').textContent = lg.length ? lg.slice().reverse().join('\n') : 'Nothing logged yet.';
     $('app-version').textContent = typeof APP_VERSION !== 'undefined' ? APP_VERSION : '';
     $('dlg-settings').showModal();
   });
+  $('btn-playlog-copy').addEventListener('click', function () { try { navigator.clipboard.writeText($('playlog').textContent); toast('Log copied.'); } catch (e) { /* ignore */ } });
+  $('btn-playlog-clear').addEventListener('click', function () { localStorage.removeItem(LS_PLOG); $('playlog').textContent = 'Nothing logged yet.'; });
   $('set-announce').addEventListener('change', function () { settings.announce = this.checked; saveSettings(); });
   $('set-pause').addEventListener('change', function () { settings.pause = Number(this.value) || 0; saveSettings(); });
   $('btn-newcycle').addEventListener('click', function () {

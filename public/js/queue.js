@@ -222,7 +222,14 @@
   // Is a prefetched signed URL still young enough to use?
   function prefetchFresh(at, now, maxAge) { return typeof at === 'number' && now - at >= 0 && now - at < maxAge; }
 
+  // Small ring buffer for the private on-device playback log.
+  function pushLog(list, entry, max) { var a = (Array.isArray(list) ? list : []).concat([entry]); return a.length > max ? a.slice(a.length - max) : a; }
+  // With the screen off, skip the short announcement / pause clips: Android Chrome drops the media
+  // session (and lets the page be frozen) for clips under ~5s, so the next chapter never starts.
+  function useShortClips(hidden) { return !hidden; }
+
   return {
+    pushLog: pushLog, useShortClips: useShortClips,
     prefetchFresh: prefetchFresh,
     ITEMS_PER_DAY: ITEMS_PER_DAY,
     localDate: localDate, daysBetween: daysBetween,

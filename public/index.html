@@ -155,6 +155,12 @@
       <hr>
       <button type="button" id="btn-newcycle" class="btn">Start a new cycle from Day 1</button>
       <button type="button" id="btn-signout" class="btn">Lock this device</button>
+      <details><summary class="small">Playback log</summary>
+        <p class="quiet small">Newest first. Stays on this device. Helps diagnose audio stopping.</p>
+        <pre id="playlog" class="small" style="max-height:14em;overflow:auto;white-space:pre-wrap"></pre>
+        <button type="button" id="btn-playlog-copy" class="btn">Copy log</button>
+        <button type="button" id="btn-playlog-clear" class="btn">Clear log</button>
+      </details>
       <p class="quiet small">Version <span id="app-version"></span></p>
       <button class="btn primary">Done</button>
     </form>

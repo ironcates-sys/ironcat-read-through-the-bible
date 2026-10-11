@@ -111,3 +111,12 @@ test('prefetchFresh: young URLs are reused, stale or future ones are not', () =>
   assert.equal(Q.prefetchFresh(9000, 2000, 5000), false);
   assert.equal(Q.prefetchFresh(undefined, 2000, 5000), false);
 });
+
+test('pushLog keeps last N; short clips skipped when hidden', () => {
+  let l = [];
+  for (let i = 0; i < 5; i++) l = Q.pushLog(l, i, 3);
+  assert.deepEqual(l, [2, 3, 4]);
+  assert.deepEqual(Q.pushLog(null, 'a', 3), ['a']);
+  assert.equal(Q.useShortClips(true), false);
+  assert.equal(Q.useShortClips(false), true);
+});
