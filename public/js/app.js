@@ -28,7 +28,7 @@
   // playback machine
   var phase = 'idle';               // idle | loading | announce | chapter | pause
   var playToken = 0;                // bumps to cancel any in-flight startItem
-  var pending = null;               // { token, metaP, resume }
+  var pending = null;               // { token, res, resume }
   var current = null;               // { day, pos, item, meta }
   var pauseLeft = 0;
   var prefetch = {};                // key -> { at, promise }
@@ -212,12 +212,26 @@
     var k = keyFor(it, tr);
     var p = prefetch[k];
     delete prefetch[k];
-    if (p && Date.now() - p.at < PREFETCH_MAX_AGE) return p.promise;
-    return fetchChapter(it, tr);   // resolved right before play
+    if (p && Q.prefetchFresh(p.at, Date.now(), PREFETCH_MAX_AGE) && !p.failed) return p;
+    return track(fetchChapter(it, tr));
   }
-  function maybePrefetch() {
-    if (phase !== 'chapter' || !isFinite(audio.duration)) return;
-    if (audio.duration - audio.currentTime > PREFETCH_SECONDS) return;
+  // Wrap a promise so its value can be read synchronously once settled (lets the 'ended' handler
+  // swap src + play() without any await when the next chapter is already resolved).
+  function track(promise) {
+    var t = { at: Date.now(), promise: promise, done: false, failed: false, value: null };
+    promise.then(function (v) { t.done = true; t.value = v; }, function () { t.failed = true; });
+    return t;
+  }
+  // Resolve chapter N+1 as soon as chapter N starts (timeupdate is throttled with the screen off).
+  // Near the end, refresh it if the signed URL is getting old or the first attempt failed.
+  function maybePrefetch(force) {
+    if (phase !== 'chapter') return;
+    if (!force) {
+      if (!isFinite(audio.duration) || audio.duration - audio.currentTime > PREFETCH_SECONDS) return;
+      var nx = todayItems()[state.pos + 1], ex = nx && prefetch[keyFor(nx, sessionTranslation)];
+      if (ex && !ex.failed && Q.prefetchFresh(ex.at, Date.now(), PREFETCH_MAX_AGE / 2)) return;
+      prefetchedFor = -1;
+    }
     if (prefetchedFor === state.pos) return;
     prefetchedFor = state.pos;
     var nextPos = state.pos + 1;
@@ -225,12 +239,13 @@
     var it = todayItems()[nextPos];
     var tr = sessionTranslation;
     var p = fetchChapter(it, tr);
-    p.catch(function () { /* will simply be resolved again at play time */ });
-    prefetch[keyFor(it, tr)] = { at: Date.now(), promise: p };
+    p.catch(function () { prefetchedFor = -1; /* retried near the end or at play time */ });
+    prefetch[keyFor(it, tr)] = track(p);
   }
 
   // ---------- playback ----------
   function setSrc(url) {
+    audio.loop = false;
     audio.src = url;
     audio.defaultPlaybackRate = settings.speed;
     audio.playbackRate = settings.speed;
@@ -256,10 +271,11 @@
     current = { day: state.day, pos: state.pos, item: it, tr: tr, meta: null };
     phase = 'loading';
     render();
-    var metaP = resolveChapter(it, tr);
-    metaP.catch(function () { /* handled in finishResolve */ });
-    pending = { token: token, metaP: metaP, resume: resume };
+    var res = resolveChapter(it, tr);
+    res.promise.catch(function () { /* handled in finishResolve */ });
+    pending = { token: token, res: res, resume: resume };
     if (followIsOpen()) { loadFollow(it, tr); renderFollow(); }
+    setMediaMetadata();
     var useAnnounce = settings.announce && !(resume > 2);
     if (useAnnounce) {
       phase = 'announce';
@@ -267,10 +283,6 @@
       tryPlay();
       updateNow(); updatePlayIcon();
     } else {
-      // Keep the (already user-activated) audio element busy with a short silent clip while the URL
-      // resolves; iOS Safari is stricter about play() calls that happen after an async gap.
-      setSrc('/announce/silence.mp3');
-      tryPlay();
       finishResolve(token);
     }
   }
@@ -278,12 +290,20 @@
   function finishResolve(token) {
     var pd = pending;
     if (!pd || pd.token !== token) return;
-    pd.metaP.then(function (meta) {
+    // Already resolved (the normal case thanks to early prefetch): swap + play synchronously.
+    if (pd.res.done) { playChapter(pd.res.value, pd.resume); return; }
+    // Not ready: keep the element playing looped silence so iOS keeps the audio session alive
+    // while hidden, instead of calling play() later from an idle element.
+    phase = 'loading';
+    setSrc('/announce/silence.mp3'); audio.loop = true;
+    tryPlay(); updateNow();
+    pd.res.promise.then(function (meta) {
       if (token !== playToken) return;
       playChapter(meta, pd.resume);
     }, function (err) {
       if (token !== playToken) return;
       phase = 'idle';
+      audio.loop = false;
       audio.pause();
       toast(err.message || 'Could not load this chapter.', 6000);
       updateNow(); updatePlayIcon();
@@ -300,6 +320,7 @@
     setCopyright(meta);
     setMediaMetadata();
     updateNow(); updatePlayIcon();
+    maybePrefetch(true);
     // Prefetch text + timings for Follow along (in memory only) so it is ready when opened.
     loadFollow(current.item, meta.translation.id);
     renderFollow();
@@ -340,12 +361,15 @@
     if (phase === 'pause') {
       pauseLeft -= 1;
       if (pauseLeft > 0) { audio.currentTime = 0; tryPlay(); } else { startItem(0); }
+      return;
     }
+    if (phase === 'loading') { audio.currentTime = 0; tryPlay(); }   // safety if loop is unsupported
   });
 
   audio.addEventListener('error', function () {
     if (phase === 'announce') { finishResolve(playToken); return; }       // graceful: skip the clip
     if (phase === 'pause') { startItem(0); return; }
+    if (phase === 'loading') { return; }
     if (phase === 'chapter' && current) {
       if (!retriedUrl) {                                                    // signed URL may have expired: re-resolve once
         retriedUrl = true;
@@ -466,7 +490,7 @@
     render();
   }
   setInterval(checkSleep, 5000);
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) { checkSleep(); if (state) render(); } });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { checkSleep(); if (state) render(); if (phase === 'loading' && audio.paused) tryPlay(); } });
 
   // ---------- Media Session (lock screen) ----------
   function setMediaMetadata() {

@@ -219,7 +219,11 @@
     return s;
   }
 
+  // Is a prefetched signed URL still young enough to use?
+  function prefetchFresh(at, now, maxAge) { return typeof at === 'number' && now - at >= 0 && now - at < maxAge; }
+
   return {
+    prefetchFresh: prefetchFresh,
     ITEMS_PER_DAY: ITEMS_PER_DAY,
     localDate: localDate, daysBetween: daysBetween,
     clipName: clipName, announceText: announceText, allClipNames: allClipNames,

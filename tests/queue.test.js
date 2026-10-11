@@ -103,3 +103,11 @@ test('streak info: days this cycle, last 7 days, friendly copy', () => {
   const i = Q.streakInfo(s, '2026-09-30', LEN);
   assert.equal(i.daysReadThisCycle, 2); assert.equal(i.readInLast7, 2); assert.equal(i.daysSinceLast, 1);
 });
+
+test('prefetchFresh: young URLs are reused, stale or future ones are not', () => {
+  const Q = require('../public/js/queue.js');
+  assert.equal(Q.prefetchFresh(1000, 2000, 5000), true);
+  assert.equal(Q.prefetchFresh(1000, 7000, 5000), false);
+  assert.equal(Q.prefetchFresh(9000, 2000, 5000), false);
+  assert.equal(Q.prefetchFresh(undefined, 2000, 5000), false);
+});
