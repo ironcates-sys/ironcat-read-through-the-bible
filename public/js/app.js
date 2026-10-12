@@ -278,16 +278,58 @@
     }, function () {});
   }
   // Buffer the next chapter in the idle element so the change needs no network and no src swap.
+  // Step 1: point the idle element at the signed CDN URL (fallback). Step 2: download the whole
+  // mp3 into memory (Blob) and switch the idle element to an object URL, so after the swap Android
+  // Chrome never has to fetch anything while the screen is off. The blob is never persisted (no
+  // Cache/IndexedDB); it lives only until that chapter has played, then its URL is revoked.
+  var blobJob = null;   // { key, url, ctrl }
+  function setElSrc(el, src) {
+    var prev = el.dataset.blobUrl;
+    el.src = src;
+    if (prev && prev !== src) { try { URL.revokeObjectURL(prev); } catch (e) { /* ignore */ } delete el.dataset.blobUrl; }
+  }
   function preloadStandby(key, url) {
     try {
       standby.pause();
       standby.loop = false;
       standby.preload = 'auto';
-      standby.src = url;
+      setElSrc(standby, url);
       standby.dataset.key = key; standby.dataset.url = url;
       standby.load();
       plog('preload ' + standby.dataset.name, key + ' ' + shortUrl(url));
     } catch (e) { plog('preload-failed', e && e.name); }
+    downloadBlob(key, url);
+  }
+  function downloadBlob(key, url) {
+    if (typeof fetch !== 'function' || typeof URL.createObjectURL !== 'function') return;
+    if (blobJob && blobJob.ctrl) { try { blobJob.ctrl.abort(); } catch (e) { /* ignore */ } }
+    var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    var job = blobJob = { key: key, url: url, ctrl: ctrl }, t0 = Date.now();
+    plog('blob-start', key);
+    fetch(url, { mode: 'cors', credentials: 'omit', cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.arrayBuffer();
+      })
+      .then(function (buf) {
+        if (blobJob !== job) return;
+        blobJob = null;
+        var bytes = buf.byteLength;
+        // The CDN labels files binary/octet-stream; tell the player it is MP3.
+        var el = Q.preloadMatches({ key: standby.dataset.key, url: standby.dataset.url }, key, url) ? standby : null;
+        if (!el) { plog('blob-unused', key + ' ' + bytes + 'B ' + (Date.now() - t0) + 'ms'); return; }
+        var obj = URL.createObjectURL(new Blob([buf], { type: 'audio/mpeg' }));
+        el.pause();
+        setElSrc(el, obj);
+        el.dataset.blobUrl = obj;
+        el.load();
+        plog('blob-done ' + el.dataset.name, key + ' ' + bytes + 'B ' + (Date.now() - t0) + 'ms');
+      })
+      .catch(function (e) {
+        if (blobJob === job) blobJob = null;
+        if (e && e.name === 'AbortError') return;
+        plog('blob-failed', key + ' ' + (e && (e.message || e.name)));
+      });
   }
 
   // ---------- playback ----------
@@ -301,7 +343,9 @@
       try { old.pause(); } catch (e) { /* ignore */ }
       delete old.dataset.key; delete old.dataset.url;
       audio.loop = false;
-      plog('swap->' + audio.dataset.name, 'ready=' + audio.readyState);
+      plog('swap->' + audio.dataset.name, 'ready=' + audio.readyState + (audio.dataset.blobUrl ? ' blob=yes' : ' blob=no'));
+      if (old.dataset.blobUrl) { try { URL.revokeObjectURL(old.dataset.blobUrl); } catch (e) { /* ignore */ } delete old.dataset.blobUrl; }
+      try { old.removeAttribute('src'); old.load(); } catch (e) { /* ignore */ }   // free the finished chapter
       if (audio.readyState >= 1) {
         if (resumeAt > 0 && resumeAt < (audio.duration || Infinity) - 2) audio.currentTime = resumeAt;
         else if (audio.currentTime) audio.currentTime = 0;
@@ -310,7 +354,7 @@
       }
     } else {
       audio.loop = false;
-      audio.src = url;
+      setElSrc(audio, url);
       delete audio.dataset.key; delete audio.dataset.url;
     }
     audio.defaultPlaybackRate = settings.speed;
@@ -343,6 +387,21 @@
   document.addEventListener('freeze', function () { plog('freeze'); });
   document.addEventListener('resume', function () { plog('resume'); });
   window.addEventListener('pagehide', function () { plog('pagehide'); });
+
+  // Fallback when no blob was ready: if playback is hidden and stuck (no progress for >4s after
+  // suspend/stalled/waiting), reload the element at the same spot and play again.
+  var stuck = { t: -1, since: 0, lastFix: 0 };
+  ['suspend', 'stalled', 'waiting'].forEach(function (n) { onAudio(n, function () { checkStuck(); }); });
+  setInterval(checkStuck, 2000);
+  function checkStuck() {
+    if (phase !== 'chapter' || audio.paused || !document.hidden || audio.dataset.blobUrl) { stuck.t = -1; return; }
+    var now = Date.now(), ct = audio.currentTime;
+    if (Math.abs(ct - stuck.t) > 0.25) { stuck.t = ct; stuck.since = now; return; }
+    if (now - stuck.since < 4000 || now - stuck.lastFix < 15000) return;
+    stuck.lastFix = now; stuck.since = now;
+    plog('stall-recover ' + audio.dataset.name, 'at=' + Math.round(ct) + 's ready=' + audio.readyState);
+    try { resumeAt = ct; audio.load(); tryPlay(); } catch (e) { plog('stall-recover-failed', e && e.name); }
+  }
 
   function tryPlay() {
     // audio.src (not currentSrc, which only updates later) = the URL just assigned.
