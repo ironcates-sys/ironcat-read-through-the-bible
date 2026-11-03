@@ -189,21 +189,28 @@
     if ('mediaSession' in navigator) navigator.mediaSession.playbackState = showPause ? 'playing' : (phase === 'idle' ? 'none' : 'paused');
     syncWakeLock(showPause);
   }
-  // Optional: keep the screen on while playing (Screen Wake Lock API). Released on pause/idle.
-  var wakeLock = null;
-  function syncWakeLock(active) {
-    var want = !!(settings.wakeLock && active && !document.hidden && 'wakeLock' in navigator);
-    if (want && !wakeLock) {
-      wakeLock = 'pending';
+  // Screen Wake Lock with reasons: 'playing' (setting, while audio plays) and 'follow' (Follow along open).
+  // Lock is held while any reason is active; browsers drop it when hidden, so we re-request on visible.
+  var wakeLock = null, wakeReasons = {}, wakePending = false;
+  function wakeWanted() { for (var k in wakeReasons) if (wakeReasons[k]) return true; return false; }
+  function setWakeReason(reason, on) { wakeReasons[reason] = !!on; applyWakeLock(); }
+  function applyWakeLock() {
+    var want = wakeWanted();
+    if (want && !wakeLock && !wakePending && !document.hidden) {
+      if (!('wakeLock' in navigator)) { if (!applyWakeLock.warned) { applyWakeLock.warned = true; plog('wakelock failed unsupported'); } return; }
+      wakePending = true;
       navigator.wakeLock.request('screen').then(function (l) {
-        wakeLock = l;
-        l.addEventListener('release', function () { if (wakeLock === l) wakeLock = null; });
-        if (!settings.wakeLock) { l.release(); }
-      }, function () { wakeLock = null; });
-    } else if (!want && wakeLock && wakeLock !== 'pending' && !document.hidden) {
+        wakePending = false; wakeLock = l;
+        plog('wakelock on ' + Object.keys(wakeReasons).filter(function (k) { return wakeReasons[k]; }).join(','));
+        l.addEventListener('release', function () { if (wakeLock === l) wakeLock = null; plog('wakelock released'); });
+        if (!wakeWanted()) { wakeLock = null; l.release().catch(function () {}); }
+      }, function (e) { wakePending = false; plog('wakelock failed ' + (e && (e.name || e.message) || e)); });
+    } else if (!want && wakeLock) {
       var l = wakeLock; wakeLock = null; l.release().catch(function () {});
     }
   }
+  function syncWakeLock(active) { setWakeReason('playing', settings.wakeLock && active); }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { setWakeReason('follow', $('dlg-follow').open); applyWakeLock(); } });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) updatePlayIcon(); });
 
   function setCopyright(meta) {
@@ -961,12 +968,14 @@
     var tgt = followTarget();
     var dlg = $('dlg-follow');
     if (!dlg.open) dlg.showModal();
+    setWakeReason('follow', true);
     followRenderedKey = null;
     loadFollow(tgt.it, tgt.tr);
     renderFollow();
     $('btn-follow-close').focus();
   }
   $('btn-follow').addEventListener('click', openFollow);
+  $('dlg-follow').addEventListener('close', function () { setWakeReason('follow', false); });
   $('btn-follow-close').addEventListener('click', function () { $('dlg-follow').close(); });
   $('btn-follow-play').addEventListener('click', togglePlay);
   $('btn-follow-back').addEventListener('click', skipBack);
