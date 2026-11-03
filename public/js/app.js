@@ -500,6 +500,7 @@
   function onChapterEnded() {
     var r = Q.chapterFinished(state, today(), len, dayCount());
     state = r.state; saveState();
+    if (r.dayFinished && $('dlg-follow').open) { $('dlg-follow').close(); plog('follow auto-closed: day complete'); }
     var stopHere = sleepStopAfterChapter || sleepMode === 'chapter';
     if (stopHere) { clearSleep(); phase = 'idle'; toast('Sleep well. Your place is saved.', 5000); render(); return; }
     if (r.dayFinished) {
